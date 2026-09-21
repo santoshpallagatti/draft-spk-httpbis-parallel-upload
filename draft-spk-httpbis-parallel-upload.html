@@ -1,0 +1,2655 @@
+<!DOCTYPE html>
+<html lang="en" class="Internet-Draft">
+<head>
+<meta charset="utf-8">
+<meta content="Common,Latin" name="scripts">
+<meta content="initial-scale=1.0" name="viewport">
+<title>Parallel Appends for Resumable Uploads</title>
+<meta content="Santosh Pallagatti" name="author">
+<meta content="
+       The resumable upload protocol lets a client continue an interrupted
+upload, but the upload has to be sent in order, one request at a time.
+This document extends that protocol so that a client can send different
+parts of the same upload in parallel. The amount of data that may arrive
+out of order is limited by a reorder window, so servers and
+intermediaries only need to buffer a bounded amount. The document also
+describes how intermediaries that inspect uploads (for data loss
+prevention or malware scanning, say) can continue to do so, and how the
+extension behaves over HTTP/1.1, HTTP/2, and HTTP/3. 
+    " name="description">
+<meta content="xml2rfc 3.34.1" name="generator">
+<meta content="resumable upload" name="keyword">
+<meta content="parallel upload" name="keyword">
+<meta content="intermediary" name="keyword">
+<meta content="content inspection" name="keyword">
+<meta content="draft-spk-httpbis-parallel-upload-latest" name="ietf.draft">
+<!-- Generator version information:
+  xml2rfc 3.34.1
+    Python 3.14.7
+    ConfigArgParse 1.7.7
+    google-i18n-address 3.1.1
+    intervaltree 3.2.1
+    Jinja2 3.1.6
+    lxml 6.1.1
+    natsort 8.4.0
+    platformdirs 4.11.10
+    pycountry 24.6.1
+    PyYAML 6.0.3
+    requests 2.33.1
+    wcwidth 0.8.4
+-->
+<link href="draft-spk-httpbis-parallel-upload.xml" rel="alternate" type="application/rfc+xml">
+<link href="#copyright" rel="license">
+<style type="text/css">@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-vietnamese.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Italic'), local('Lora-Italic'), url('https://martinthomson.github.io/rfc-css/fonts/lora-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-cyrillic.woff2') format('woff2');
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-vietnamese.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Lora Regular'), local('Lora-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/lora-regular-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C88, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-cyrillic.woff2') format('woff2');
+  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-vietnamese.woff2') format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-024F, U+0259, U+1E00-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: local('Lora Bold'), local('Lora-Bold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-bold-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Lora';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: local('Lora SemiBold'), local('Lora-SemiBold'), url('https://martinthomson.github.io/rfc-css/fonts/lora-semibold-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Oxygen Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Oxygen Mono'), local('OxygenMono-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/oxygenmono-regular-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Oxygen Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Oxygen Mono'), local('OxygenMono-Regular'), url('https://martinthomson.github.io/rfc-css/fonts/oxygenmono-regular-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-greek.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: italic;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-italic-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-cyrillic-ext.woff2') format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-cyrillic.woff2') format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-greek.woff2') format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Sofia Sans Semi Condensed';
+  font-style: normal;
+  font-weight: 1 1000;
+  src: url('https://martinthomson.github.io/rfc-css/fonts/sofiasanssemicondensed-regular-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  color-scheme: light dark;
+  --background-color: #fff;
+  --text-color: #222;
+  --title-color: #191919;
+  --link-color: #2a6496;
+  --highlight-color: #f9f9f9;
+  --line-color: #eee;
+  --pilcrow-weak: #ddd;
+  --pilcrow-strong: #bbb;
+  --small-font-size: 14.5px;
+  --font-mono: 'Oxygen Mono', monospace;
+  --font-title: "Sofia Sans Semi Condensed", sans-serif;
+  scrollbar-color: #bbb #eee;
+}
+body {
+  max-width: 600px;
+  margin: 75px auto;
+  padding: 0 5px;
+  color: var(--text-color);
+  background-color: var(--background-color);
+  font: 16px/22px "Lora", serif;
+  scroll-behavior: smooth;
+}
+
+.ears {
+  display: none;
+}
+
+/* headings */
+section {
+  clear: both;
+}
+.section-number {
+  padding-right: 0.5em;
+}
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-title);
+  font-weight: 680;
+  margin: 0.8em 0 0.3em;
+  font-size-adjust: 0.5;
+  color: var(--title-color);
+}
+h1 {
+  &#title {
+    font-size: 32px;
+    line-height: 40px;
+    clear: both;
+    margin: 1.5em 0 0.2em;
+  }
+  &#rfcnum {
+    margin: 1.5em 0 0.2em;
+    & + h1#title {
+      margin: 0.2em 0;
+    }
+  }
+}
+
+h1, h2, h3 {
+  font-size: 22px;
+  line-height: 27px;
+}
+h4, h5, h6 {
+  font-size: 20px;
+  line-height: 24px;
+}
+
+/* general structure */
+.author {
+  padding-bottom: 0.3em;
+  vertical-align: top;
+}
+#abstract+p {
+  font-size: 18px;
+  line-height: 24px;
+  & code, & samp, & tt {
+    font-size: 16px;
+    line-height: 0;
+  }
+}
+
+p {
+  padding: 0;
+  margin: 0.5em 0;
+  text-align: left;
+}
+div {
+  margin: 0;
+}
+.alignRight {
+  margin: 1em 0;
+  &.art-text {
+    background-color: var(--highlight-color);
+    border: 1px solid var(--line-color);
+    border-radius: 3px;
+    padding: 0.5em 1em 0;
+    margin-bottom: 0.5em;
+    & pre {
+      padding: 0;
+      width: auto;
+    }
+  }
+  & > *:first-child {
+    border: none;
+    margin: 0;
+    float: right;
+    clear: both;
+  }
+  & > *:nth-child(2) {
+    clear: both;
+    display: block;
+    border: none;
+  }
+}
+svg {
+  display: block;
+  /* font-family isn't space-separated, but =~ will have to do */
+  &[font-family~="monospace" i], & [font-family~="monospace" i] {
+    font-family: var(--font-mono);
+  }
+}
+.alignCenter {
+  margin: 1em 0;
+  &.art-text {
+    background-color: var(--highlight-color);
+    border: 1px solid var(--line-color);
+    border-radius: 3px;
+    padding: 0.5em 1em 0;
+    margin-bottom: 0.5em;
+    & pre {
+      padding: 0;
+      width: auto;
+    }
+  }
+  & > *:first-child {
+    border: none;
+    /* this isn't optimal, but it's an existence proof.  PrinceXML doesn't
+       support flexbox yet.
+    */
+    display: table;
+    margin: 0 auto;
+  }
+}
+
+/* lists */
+ol, ul {
+  padding: 0;
+  margin: 0 0 0.5em 2em;
+  & :is(ol, ul) {
+    margin-left: 1em;
+  }
+}
+li {
+  margin: 0 0 0.25em 0;
+}
+ul.empty, .ulEmpty {
+  list-style-type: none;
+  & li {
+    margin-top: 0.5em;
+  }
+}
+:is(ul, ol).compact, .ulCompact, .olCompact {
+  margin: 0 0 0 2em;
+  & li {
+    margin: 0;
+    & :first-child { margin-top: 0; }
+    & :last-child { margin-bottom: 0; }
+  }
+}
+
+/* definition lists */
+dl {
+  clear: left;
+  --indent: 3ch;
+  /* --indent: attr(indent ch); not supported in any browser, but we can dream */
+  &.olPercent {
+    --indent: 5ch;
+    & > dt {
+      min-width: calc(var(--indent) - 2ch);
+      float: none;
+    }
+  }
+
+  dl > dd > & {
+    margin-top: 0.5em;
+    margin-bottom: 0;
+  }
+
+  &:not(.dlNewline) > dt {
+    float: left;
+    margin-right: 2ch;
+    min-width: 8ch;
+  }
+  & > dd {
+    margin-bottom: .8em;
+    margin-left: var(--indent) !important; /* stupid element overrides */
+    min-height: 2ex;
+  }
+}
+:is(dl.compact, .dlCompact) > dd {
+  margin-bottom: 0;
+  & > :is(:first-child, .break:first-child + *) {
+    margin-top: 0;
+  }
+  & > :is(:last-child) {
+    margin-bottom: 0;
+  }
+}
+:is(dd, span).break {
+  display: none;
+}
+
+/* links */
+a {
+  text-decoration: none;
+  &[href] {
+    color: var(--link-color);
+    &:hover { text-decoration: underline; }
+    &.selfRef {
+      color: var(--text-color);
+      &:hover {
+        text-decoration: none;
+        background-color: var(--highlight-color);
+      }
+    }
+  }
+}
+.iref + a[href].internal {
+  color: var(--text-color);
+}
+a.xref:is(.cite, .auto), :is(#status-of-memo, #copyright) a {
+  white-space: nowrap;
+}
+
+/* Figures */
+tt, code, pre {
+  background-color: var(--highlight-color);
+  font: 14px/22px var(--font-mono);
+}
+tt, code {
+  /* changing the font for inline elements leads to different ascender
+     and descender heights; as we want to retain baseline alignment,
+     remove leading to avoid altering the final height of lines
+     note: this fails if these blocks take an entire line,
+     a different solution would be great */
+  line-height: 0;
+}
+:is(h1, h2, h3, h4, h5, h6) :is(tt, code) {
+  font-size: 84%;
+}
+pre {
+  border: 1px solid var(--line-color);
+  font-size: 13.5px;
+  line-height: 16px;
+  letter-spacing: -0.2px;
+  margin: 5px;
+  padding: 5px;
+}
+img {
+  max-width: 100%;
+}
+figure {
+  margin: 0.5em 0;
+  padding: 0;
+  & blockquote {
+    margin: 0.8em 0.4em 0.4em;
+  }
+}
+figcaption, caption {
+  font-style: italic;
+  margin: 0.5em 1.5em;
+  text-align: left;
+  caption-side: bottom;
+}
+@media screen {
+  /* Auto-collapse boilerplate. */
+  :is(#status-of-memo, #copyright) {
+    & p {
+      margin: -2px 0;
+      max-height: 0;
+      transition: max-height 2s ease, margin 0.5s ease 0.5s;
+      overflow: hidden;
+    }
+    &:hover p,
+    & h2:target ~ p {
+      margin: 0.5em 0;
+      max-height: 500px;
+      overflow: auto;
+    }
+  }
+  pre, svg {
+    display: inline-block;
+    /* In the horizontal direction, sometimes people make over-sized figures.
+       Scrollbars for those is therefore necessary: auto adds them as necessary..
+       In the vertical direction, the line-height can combine with the font
+       asender/descender height to produce scrollbars: hidden avoids that. */
+    overflow: auto hidden;
+  }
+  pre {
+    max-width: 100%;
+    width: calc(100% - 22px - 1em);
+  }
+  svg {
+    max-width: calc(100% - 22px - 1em);
+  }
+  figure pre {
+    display: block;
+    width: calc(100% - 25px);
+  }
+  :is(pre, svg) + .pilcrow {
+    display: inline-block;
+    vertical-align: text-bottom;
+    padding-bottom: 8px;
+  }
+}
+
+/* aside, blockquote */
+aside, blockquote {
+  margin-left: 0;
+  padding: 0 2em;
+  font-style: italic;
+}
+blockquote {
+  margin: 1em 0;
+  border-left: 2px var(--pilcrow-strong) solid;
+}
+cite {
+  display: block;
+  text-align: right;
+  font-style: italic;
+}
+
+/* tables */
+table {
+  width: auto;
+  max-width: 100%;
+  margin: 0 0 1em;
+  border-collapse: collapse;
+  &.right { margin-left: auto; }
+  &.center { margin-left: auto; margin-right: auto; }
+  &.left { margin-right: auto; }
+  & .text-left { text-align: left; }
+  & .text-center { text-align: center; }
+  & .text-right { text-align: right; }
+  & caption {
+    margin: 0;
+    padding: 3px 0 3px 1em;
+  }
+  & p { margin: 0; }
+}
+
+thead, tbody {
+  border: 1px solid var(--line-color);
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  padding: 5px 10px;
+}
+th {
+  background-color: var(--line-color);
+}
+:is(tr:nth-child(2n), thead+tbody > tr:nth-child(2n+1)) > td {
+  background-color: var(--background-color);
+}
+:is(tr:nth-child(2n+1), thead+tbody > tr:nth-child(2n)) > td {
+  background-color: var(--highlight-color);
+}
+
+/* pilcrow */
+a.pilcrow {
+  margin-left: 3px;
+  opacity: 0.2;
+  user-select: none;
+  &[href] {
+    color: var(--pilcrow-weak);
+    &:hover { text-decoration: none; }
+  }
+  @media not print {
+    :hover > &, &:focus {
+      opacity: 1;
+    }
+    &[href]:hover {
+      color: var(--pilcrow-strong);
+      background-color: transparent;
+    }
+  }
+  @media print {
+    display: none;
+  }
+}
+
+/* misc */
+hr {
+  border: 0;
+  border-top: 1px solid var(--line-color);
+}
+.bcp14 {
+  font-variant: small-caps;
+  font-weight: 600;
+  font-size: var(--small-font-size);
+}
+.role {
+  font-variant: all-small-caps;
+}
+sub, sup {
+  line-height: 1;
+  font-size: 80%;
+}
+
+/* info block */
+#identifiers {
+  margin: 0;
+  font-size: var(--small-font-size);
+  line-height: 18px;
+  --identifier-width: 15ch;
+  & dt {
+    width: var(--identifier-width);
+    min-width: var(--identifier-width);
+    clear: left;
+    float: left;
+    text-align: right;
+    margin-right: 1ch;
+  }
+  & dd {
+    margin: 0;
+    margin-left: calc(1em + var(--identifier-width)) !important;
+    min-width: 5em;
+  }
+  & .authors {
+    & .author {
+      display: inline-block;
+      margin-right: 1.5em;
+    }
+    & .org {
+      font-style: italic;
+    }
+  }
+}
+
+/* The prepared/rendered info at the very bottom of the page */
+.docInfo {
+  color: #999;
+  font-size: 0.9em;
+  font-style: italic;
+  margin-top: 2em;
+  & .prepared {
+    float: right;
+  }
+}
+
+/* table of contents */
+#toc {
+  padding: 0.75em 0 2em 0;
+  margin-bottom: 1em;
+
+  & nav {
+    & ul {
+      margin: 0 0.5em 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    & li {
+      line-height: 1.3em;
+      margin: 2px 0;
+      padding-left: 1.2em;
+      text-indent: -1.2em;
+    }
+  }
+  & a.xref {
+    white-space: normal;
+  }
+}
+
+.references {
+  & > dt {
+    text-align: right;
+    font-weight: bold;
+    min-width: 10ch;
+    margin-right: 1.5ch;
+    &:target::before {
+      content: "⇒";
+      margin: 0 10px 0 -25px;
+    }
+  }
+  & > dd {
+    margin-left: 12ch !important;
+    overflow: visible;
+    & .refInstance {
+      margin-bottom: 0.8em;
+    }
+    & .ascii {
+      margin-bottom: 0.25em;
+    }
+  }
+}
+
+#rfc\.index\.index + ul {
+  margin-left: 0;
+}
+
+/* authors */
+address.vcard {
+  font-style: normal;
+  max-width: 20em;
+  margin: 1em auto 1em 0;
+
+  & .nameRole {
+    font-weight: 700;
+    margin-left: 0;
+  }
+  & .label {
+    margin: 0.5em 0;
+  }
+  & .type {
+    display: none;
+  }
+  & .alternative-contact {
+    margin: 0.5em 0 0.25em 0;
+  }
+  & .non-ascii {
+    margin: 0 0 0 2em;
+  }
+  & div.left {
+    text-align: left;
+  }
+  & div.right {
+    text-align: right;
+  }
+}
+
+hr.addr {
+  border-top: 1px dashed;
+  margin: 0;
+  color: #ddd;
+  max-width: calc(100% - 16px);
+}
+@media (min-width: 500px) {
+  #authors-addresses {
+    & > section {
+      column-count: 2;
+      column-gap: 20px;
+    }
+    & > section > h2 {
+      column-span: all;
+    }
+    /* hack for break-inside: avoid-column */
+    & address {
+      display: inline-block;
+      break-inside: avoid-column;
+    }
+  }
+}
+
+/* Comments */
+.rfcEditorRemove {
+  & p:first-of-type {
+    font-style: italic;
+  }
+}
+.cref {
+  background-color: rgba(249, 232, 105, 0.3);
+  padding: 2px 4px;
+}
+.crefSource {
+  font-style: italic;
+}
+
+@media screen {
+  #toc {
+    & nav {
+      font-family: var(--font-title);
+      font-weight: 360;
+      & > ul { margin-bottom: 2em; }
+      & ul {
+        margin: 0 0 0 4px;
+        & :is(p, li) {
+          margin: 2px 0;
+        }
+      }
+    }
+    & a.toplink {
+      float: right;
+    }
+  }
+}
+@media not screen {
+  #toc a.toplink {
+    display: none;
+  }
+}
+
+
+/* TOC layout for smaller screens */
+@media screen and (max-width: 929px) {
+  #toc {
+    position: fixed;
+    z-index: 2;
+    top: 0;
+    right: 0;
+    padding: 1px 0 0 0;
+    margin: 0;
+    border-bottom: 1px solid #ccc;
+    opacity: 0.6;
+    & h2 {
+      margin: 0;
+      padding: 2px 0 2px 6px;
+      padding-right: 1em;
+      font-size: 18px;
+      line-height: 24px;
+      min-width: 190px;
+      text-align: right;
+      background-color: #444;
+      color: white;
+      cursor: pointer;
+      &::before { /* css hamburger */
+        float: right;
+        position: relative;
+        width: 1em;
+        height: 1px;
+        left: -164px;
+        margin: 8px 0 0 0;
+        background: white none repeat scroll 0 0;
+        box-shadow: 0 4px 0 0 white, 0 8px 0 0 white;
+        content: "";
+      }
+    }
+    & nav {
+      display: none;
+      background-color: var(--background-color);
+      padding: 0.5em 1em 1em;
+      overflow: auto;
+      overscroll-behavior: contain;
+      height: calc(100vh - 48px);
+      border-left: 1px solid #ddd;
+    }
+    &.active {
+      opacity: 1;
+      & nav { display: block; }
+    }
+    /* Make the collapsed ToC header render white on gray also when it's a link */
+    & h2 a,
+    & h2 a:is(:link, :focus, :hover),
+    & a.toplink,
+    & a.toplink:hover {
+      color: white;
+      background-color: #444;
+      text-decoration: none;
+    }
+    & a.toplink {
+      margin: 2px 0.5em 0;
+    }
+  }
+}
+
+/* TOC layout for wide screens */
+@media screen and (min-width: 930px) {
+  body {
+    padding-right: 360px;
+    padding-right: calc(min(180px + 20%, 500px));
+  }
+  #toc {
+    position: fixed;
+    bottom: 0;
+    right: 0;
+    right: calc(50vw - 480px);
+    width: 312px;
+    margin: 0;
+    padding: 0;
+    z-index: 1;
+    & h2 {
+      margin: 0;
+      padding: 0.25em 1em 1em 0;
+    }
+    & nav {
+      display: block;
+      height: calc(90vh - 84px);
+      bottom: 0;
+      padding: 0.5em 0 2em;
+      overflow: auto;
+      overscroll-behavior: contain;
+      scrollbar-width: thin;
+    }
+    & a.toplink {
+      margin: 8px 0.5em 0;
+    }
+  }
+  img { /* future proofing */
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+/* pagination */
+@media print {
+  body {
+    width: 100%;
+  }
+  p {
+    orphans: 3;
+    widows: 3;
+  }
+  #n-copyright-notice {
+    border-bottom: none;
+  }
+  #toc {
+    page-break-before: always;
+    border-top: none;
+    padding-top: 0;
+  }
+  #n-introduction {
+    page-break-before: always;
+  }
+  figure, pre, .vcard {
+    page-break-inside: avoid;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+  }
+  :is(h2, h3, h4, h5, h6)+*, dd {
+    page-break-before: avoid;
+  }
+  pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 10pt;
+  }
+  table {
+    border: 1px solid #ddd;
+  }
+  td {
+    border-top: 1px solid #ddd;
+  }
+}
+
+@page :first {
+  padding-top: 0;
+  @top-left {
+    content: normal;
+    border: none;
+  }
+  @top-center {
+    content: normal;
+    border: none;
+  }
+  @top-right {
+    content: normal;
+    border: none;
+  }
+}
+
+@page {
+  size: A4;
+  margin-bottom: 45mm;
+  padding-top: 20px;
+}
+
+/* Dark mode. */
+@media (prefers-color-scheme: dark) {
+:root {
+  --background-color: #121212;
+  --text-color: #f0f0f0;
+  --title-color: #fff;
+  --link-color: #4da4f0;
+  --highlight-color: #282828;
+  --line-color: #444;
+  --pilcrow-weak: #444;
+  --pilcrow-strong: #666;
+  scrollbar-color: #777 #333;
+}
+}
+
+/* SVG Trick: a prefix match works because only black and white are allowed */
+svg {
+  & :is([stroke="black"], [stroke^="#000"]) {
+    stroke: var(--text-color);
+  }
+  & :is([stroke="white"], [stroke^="#fff"]) {
+    stroke: var(--background-color);
+  }
+  & :is([fill="black"], [fill^="#000"], :not([fill])) {
+    fill: var(--text-color);
+  }
+  & :is([fill="white"], [fill^="#fff"]) {
+    fill: var(--background-color);
+  }
+}
+</style>
+
+</head>
+<body class="xml2rfc">
+<table class="ears">
+<thead><tr>
+<td class="left">Internet-Draft</td>
+<td class="center">Parallel Resumable Uploads</td>
+<td class="right">September 2026</td>
+</tr></thead>
+<tfoot><tr>
+<td class="left">Pallagatti</td>
+<td class="center">Expires 25 March 2027</td>
+<td class="right">[Page]</td>
+</tr></tfoot>
+</table>
+<div id="external-metadata" class="document-information"></div>
+<div id="internal-metadata" class="document-information">
+<dl id="identifiers">
+<dt class="label-workgroup">Workgroup:</dt>
+<dd class="workgroup">HTTP</dd>
+<dt class="label-internet-draft">Internet-Draft:</dt>
+<dd class="internet-draft">draft-spk-httpbis-parallel-upload-latest</dd>
+<dt class="label-published">Published:</dt>
+<dd class="published">
+<time datetime="2026-09-21" class="published">21 September 2026</time>
+    </dd>
+<dt class="label-intended-status">Intended Status:</dt>
+<dd class="intended-status">Standards Track</dd>
+<dt class="label-expires">Expires:</dt>
+<dd class="expires"><time datetime="2027-03-25">25 March 2027</time></dd>
+<dt class="label-authors">Author:</dt>
+<dd class="authors">
+<div class="author">
+      <div class="author-name">S. Pallagatti</div>
+<div class="org">Zscaler</div>
+</div>
+</dd>
+</dl>
+</div>
+<h1 id="title">Parallel Appends for Resumable Uploads</h1>
+<section id="section-abstract">
+      <h2 id="abstract"><a href="#abstract" class="selfRef">Abstract</a></h2>
+<p id="section-abstract-1">The resumable upload protocol lets a client continue an interrupted
+upload, but the upload has to be sent in order, one request at a time.
+This document extends that protocol so that a client can send different
+parts of the same upload in parallel. The amount of data that may arrive
+out of order is limited by a reorder window, so servers and
+intermediaries only need to buffer a bounded amount. The document also
+describes how intermediaries that inspect uploads (for data loss
+prevention or malware scanning, say) can continue to do so, and how the
+extension behaves over HTTP/1.1, HTTP/2, and HTTP/3.<a href="#section-abstract-1" class="pilcrow">¶</a></p>
+</section>
+<section class="note rfcEditorRemove" id="section-note.1">
+      <h2 id="name-about-this-document">
+<a href="#name-about-this-document" class="section-name selfRef">About This Document</a>
+      </h2>
+<p id="section-note.1-1">This note is to be removed before publishing as an RFC.<a href="#section-note.1-1" class="pilcrow">¶</a></p>
+<p id="section-note.1-2">
+        The latest revision of this draft can be found at <span><a href="https://santoshpallagatti.github.io/draft-spk-httpbis-parallel-upload/draft-spk-httpbis-parallel-upload.html">https://santoshpallagatti.github.io/draft-spk-httpbis-parallel-upload/draft-spk-httpbis-parallel-upload.html</a></span>.
+        Status information for this document may be found at <span><a href="https://datatracker.ietf.org/doc/draft-spk-httpbis-parallel-upload/">https://datatracker.ietf.org/doc/draft-spk-httpbis-parallel-upload/</a></span>.<a href="#section-note.1-2" class="pilcrow">¶</a></p>
+<p id="section-note.1-3">
+        Discussion of this document takes place on the
+        HTTP Working Group mailing list (<span><a href="mailto:ietf-http-wg@w3.org">mailto:ietf-http-wg@w3.org</a></span>),
+        which is archived at <span><a href="https://lists.w3.org/Archives/Public/ietf-http-wg/">https://lists.w3.org/Archives/Public/ietf-http-wg/</a></span>.<a href="#section-note.1-3" class="pilcrow">¶</a></p>
+<p id="section-note.1-4">Source for this draft and an issue tracker can be found at
+        <span><a href="https://github.com/santoshpallagatti/draft-spk-httpbis-parallel-upload">https://github.com/santoshpallagatti/draft-spk-httpbis-parallel-upload</a></span>.<a href="#section-note.1-4" class="pilcrow">¶</a></p>
+</section>
+<div id="status-of-memo">
+<section id="section-boilerplate.1">
+        <h2 id="name-status-of-this-memo">
+<a href="#name-status-of-this-memo" class="section-name selfRef">Status of This Memo</a>
+        </h2>
+<p id="section-boilerplate.1-1">
+        This Internet-Draft is submitted in full conformance with the
+        provisions of BCP 78 and BCP 79.<a href="#section-boilerplate.1-1" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.1-2">
+        Internet-Drafts are working documents of the Internet Engineering Task
+        Force (IETF). Note that other groups may also distribute working
+        documents as Internet-Drafts. The list of current Internet-Drafts is
+        at <span><a href="https://datatracker.ietf.org/drafts/current/">https://datatracker.ietf.org/drafts/current/</a></span>.<a href="#section-boilerplate.1-2" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.1-3">
+        Internet-Drafts are draft documents valid for a maximum of six months
+        and may be updated, replaced, or obsoleted by other documents at any
+        time. It is inappropriate to use Internet-Drafts as reference
+        material or to cite them other than as "work in progress."<a href="#section-boilerplate.1-3" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.1-4">
+        This Internet-Draft will expire on 25 March 2027.<a href="#section-boilerplate.1-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="copyright">
+<section id="section-boilerplate.2">
+        <h2 id="name-copyright-notice">
+<a href="#name-copyright-notice" class="section-name selfRef">Copyright Notice</a>
+        </h2>
+<p id="section-boilerplate.2-1">
+            Copyright (c) 2026 IETF Trust and the persons identified as the
+            document authors. All rights reserved.<a href="#section-boilerplate.2-1" class="pilcrow">¶</a></p>
+<p id="section-boilerplate.2-2">
+            This document is subject to BCP 78 and the IETF Trust's Legal
+            Provisions Relating to IETF Documents
+            (<span><a href="https://trustee.ietf.org/license-info">https://trustee.ietf.org/license-info</a></span>) in effect on the date of
+            publication of this document. Please review these documents
+            carefully, as they describe your rights and restrictions with
+            respect to this document. Code Components extracted from this
+            document must include Revised BSD License text as described in
+            Section 4.e of the Trust Legal Provisions and are provided without
+            warranty as described in the Revised BSD License.<a href="#section-boilerplate.2-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="toc">
+<section id="section-toc.1">
+        <a href="#" onclick="scroll(0,0)" class="toplink">▲</a><h2 id="name-table-of-contents">
+<a href="#name-table-of-contents" class="section-name selfRef">Table of Contents</a>
+        </h2>
+<nav class="toc"><ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.1">
+            <p id="section-toc.1-1.1.1" class="keepWithNext"><a href="#section-1" class="auto internal xref">1</a>.  <a href="#name-introduction" class="internal xref">Introduction</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.1.2.1">
+                <p id="section-toc.1-1.1.2.1.1" class="keepWithNext"><a href="#section-1.1" class="auto internal xref">1.1</a>.  <a href="#name-use-cases" class="internal xref">Use Cases</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.2">
+            <p id="section-toc.1-1.2.1" class="keepWithNext"><a href="#section-2" class="auto internal xref">2</a>.  <a href="#name-conventions-and-definitions" class="internal xref">Conventions and Definitions</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.3">
+            <p id="section-toc.1-1.3.1"><a href="#section-3" class="auto internal xref">3</a>.  <a href="#name-overview" class="internal xref">Overview</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4">
+            <p id="section-toc.1-1.4.1"><a href="#section-4" class="auto internal xref">4</a>.  <a href="#name-negotiating-parallel-mode" class="internal xref">Negotiating Parallel Mode</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.1">
+                <p id="section-toc.1-1.4.2.1.1"><a href="#section-4.1" class="auto internal xref">4.1</a>.  <a href="#name-the-upload-parallel-request" class="internal xref">The Upload-Parallel Request Field</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.2">
+                <p id="section-toc.1-1.4.2.2.1"><a href="#section-4.2" class="auto internal xref">4.2</a>.  <a href="#name-upload-limit-parameters" class="internal xref">Upload-Limit Parameters</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.3">
+                <p id="section-toc.1-1.4.2.3.1"><a href="#section-4.3" class="auto internal xref">4.3</a>.  <a href="#name-tightening-by-intermediarie" class="internal xref">Tightening by Intermediaries</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.4.2.4">
+                <p id="section-toc.1-1.4.2.4.1"><a href="#section-4.4" class="auto internal xref">4.4</a>.  <a href="#name-falling-back-to-sequential-" class="internal xref">Falling Back to Sequential Uploads</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5">
+            <p id="section-toc.1-1.5.1"><a href="#section-5" class="auto internal xref">5</a>.  <a href="#name-parallel-appends" class="internal xref">Parallel Appends</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.1">
+                <p id="section-toc.1-1.5.2.1.1"><a href="#section-5.1" class="auto internal xref">5.1</a>.  <a href="#name-the-reorder-window-2" class="internal xref">The Reorder Window</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.2">
+                <p id="section-toc.1-1.5.2.2.1"><a href="#section-5.2" class="auto internal xref">5.2</a>.  <a href="#name-append-requests" class="internal xref">Append Requests</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.3">
+                <p id="section-toc.1-1.5.2.3.1"><a href="#section-5.3" class="auto internal xref">5.3</a>.  <a href="#name-overlapping-and-repeated-ra" class="internal xref">Overlapping and Repeated Ranges</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.5.2.4">
+                <p id="section-toc.1-1.5.2.4.1"><a href="#section-5.4" class="auto internal xref">5.4</a>.  <a href="#name-interrupted-appends" class="internal xref">Interrupted Appends</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.6">
+            <p id="section-toc.1-1.6.1"><a href="#section-6" class="auto internal xref">6</a>.  <a href="#name-reporting-received-ranges" class="internal xref">Reporting Received Ranges</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.7">
+            <p id="section-toc.1-1.7.1"><a href="#section-7" class="auto internal xref">7</a>.  <a href="#name-upload-completion" class="internal xref">Upload Completion</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.7.2.1">
+                <p id="section-toc.1-1.7.2.1.1"><a href="#section-7.1" class="auto internal xref">7.1</a>.  <a href="#name-automatic-commit" class="internal xref">Automatic Commit</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.7.2.2">
+                <p id="section-toc.1-1.7.2.2.1"><a href="#section-7.2" class="auto internal xref">7.2</a>.  <a href="#name-explicit-commit" class="internal xref">Explicit Commit</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.8">
+            <p id="section-toc.1-1.8.1"><a href="#section-8" class="auto internal xref">8</a>.  <a href="#name-changes-to-resumable-upload" class="internal xref">Changes to Resumable Upload Rules in Parallel Mode</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.9">
+            <p id="section-toc.1-1.9.1"><a href="#section-9" class="auto internal xref">9</a>.  <a href="#name-client-behavior" class="internal xref">Client Behavior</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.10">
+            <p id="section-toc.1-1.10.1"><a href="#section-10" class="auto internal xref">10</a>. <a href="#name-server-requirements" class="internal xref">Server Requirements</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.10.2.1">
+                <p id="section-toc.1-1.10.2.1.1"><a href="#section-10.1" class="auto internal xref">10.1</a>.  <a href="#name-upload-state" class="internal xref">Upload State</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.10.2.2">
+                <p id="section-toc.1-1.10.2.2.1"><a href="#section-10.2" class="auto internal xref">10.2</a>.  <a href="#name-enforcing-limits" class="internal xref">Enforcing Limits</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.10.2.3">
+                <p id="section-toc.1-1.10.2.3.1"><a href="#section-10.3" class="auto internal xref">10.3</a>.  <a href="#name-storage-and-visibility" class="internal xref">Storage and Visibility</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.10.2.4">
+                <p id="section-toc.1-1.10.2.4.1"><a href="#section-10.4" class="auto internal xref">10.4</a>.  <a href="#name-resource-management" class="internal xref">Resource Management</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11">
+            <p id="section-toc.1-1.11.1"><a href="#section-11" class="auto internal xref">11</a>. <a href="#name-intermediary-requirements" class="internal xref">Intermediary Requirements</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.1">
+                <p id="section-toc.1-1.11.2.1.1"><a href="#section-11.1" class="auto internal xref">11.1</a>.  <a href="#name-all-intermediaries" class="internal xref">All Intermediaries</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.2">
+                <p id="section-toc.1-1.11.2.2.1"><a href="#section-11.2" class="auto internal xref">11.2</a>.  <a href="#name-terminating-parallel-mode-a" class="internal xref">Terminating Parallel Mode at an Intermediary</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3">
+                <p id="section-toc.1-1.11.2.3.1"><a href="#section-11.3" class="auto internal xref">11.3</a>.  <a href="#name-inspecting-intermediaries" class="internal xref">Inspecting Intermediaries</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.1">
+                    <p id="section-toc.1-1.11.2.3.2.1.1"><a href="#section-11.3.1" class="auto internal xref">11.3.1</a>.  <a href="#name-in-order-processing" class="internal xref">In-Order Processing</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.2">
+                    <p id="section-toc.1-1.11.2.3.2.2.1"><a href="#section-11.3.2" class="auto internal xref">11.3.2</a>.  <a href="#name-forwarding-strategies" class="internal xref">Forwarding Strategies</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.3">
+                    <p id="section-toc.1-1.11.2.3.2.3.1"><a href="#section-11.3.3" class="auto internal xref">11.3.3</a>.  <a href="#name-holding-the-tail-append" class="internal xref">Holding the Tail Append</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.4">
+                    <p id="section-toc.1-1.11.2.3.2.4.1"><a href="#section-11.3.4" class="auto internal xref">11.3.4</a>.  <a href="#name-offset-retrieval-while-hold" class="internal xref">Offset Retrieval While Holding</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.5">
+                    <p id="section-toc.1-1.11.2.3.2.5.1"><a href="#section-11.3.5" class="auto internal xref">11.3.5</a>.  <a href="#name-verdicts" class="internal xref">Verdicts</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.6">
+                    <p id="section-toc.1-1.11.2.3.2.6.1"><a href="#section-11.3.6" class="auto internal xref">11.3.6</a>.  <a href="#name-the-upload-inspection-respo" class="internal xref">The Upload-Inspection Response Field</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.11.2.3.2.7">
+                    <p id="section-toc.1-1.11.2.3.2.7.1"><a href="#section-11.3.7" class="auto internal xref">11.3.7</a>.  <a href="#name-reusing-earlier-verdicts" class="internal xref">Reusing Earlier Verdicts</a></p>
+</li>
+                </ul>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12">
+            <p id="section-toc.1-1.12.1"><a href="#section-12" class="auto internal xref">12</a>. <a href="#name-http-version-considerations" class="internal xref">HTTP Version Considerations</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.1">
+                <p id="section-toc.1-1.12.2.1.1"><a href="#section-12.1" class="auto internal xref">12.1</a>.  <a href="#name-http-2-and-http-3" class="internal xref">HTTP/2 and HTTP/3</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.1.2.1">
+                    <p id="section-toc.1-1.12.2.1.2.1.1"><a href="#section-12.1.1" class="auto internal xref">12.1.1</a>.  <a href="#name-priorities" class="internal xref">Priorities</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.1.2.2">
+                    <p id="section-toc.1-1.12.2.1.2.2.1"><a href="#section-12.1.2" class="auto internal xref">12.1.2</a>.  <a href="#name-flow-control" class="internal xref">Flow Control</a></p>
+</li>
+                  <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.1.2.3">
+                    <p id="section-toc.1-1.12.2.1.2.3.1"><a href="#section-12.1.3" class="auto internal xref">12.1.3</a>.  <a href="#name-cancellation-and-early-data" class="internal xref">Cancellation and Early Data</a></p>
+</li>
+                </ul>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.2">
+                <p id="section-toc.1-1.12.2.2.1"><a href="#section-12.2" class="auto internal xref">12.2</a>.  <a href="#name-http-11" class="internal xref">HTTP/1.1</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13">
+            <p id="section-toc.1-1.13.1"><a href="#section-13" class="auto internal xref">13</a>. <a href="#name-problem-types" class="internal xref">Problem Types</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.14">
+            <p id="section-toc.1-1.14.1"><a href="#section-14" class="auto internal xref">14</a>. <a href="#name-security-considerations" class="internal xref">Security Considerations</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.15">
+            <p id="section-toc.1-1.15.1"><a href="#section-15" class="auto internal xref">15</a>. <a href="#name-iana-considerations" class="internal xref">IANA Considerations</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.15.2.1">
+                <p id="section-toc.1-1.15.2.1.1"><a href="#section-15.1" class="auto internal xref">15.1</a>.  <a href="#name-http-field-names" class="internal xref">HTTP Field Names</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.15.2.2">
+                <p id="section-toc.1-1.15.2.2.1"><a href="#section-15.2" class="auto internal xref">15.2</a>.  <a href="#name-upload-limit-parameters-2" class="internal xref">Upload-Limit Parameters</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.15.2.3">
+                <p id="section-toc.1-1.15.2.3.1"><a href="#section-15.3" class="auto internal xref">15.3</a>.  <a href="#name-http-problem-types" class="internal xref">HTTP Problem Types</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.16">
+            <p id="section-toc.1-1.16.1"><a href="#section-16" class="auto internal xref">16</a>. <a href="#name-references" class="internal xref">References</a></p>
+<ul class="compact toc ulBare ulEmpty">
+<li class="compact toc ulBare ulEmpty" id="section-toc.1-1.16.2.1">
+                <p id="section-toc.1-1.16.2.1.1"><a href="#section-16.1" class="auto internal xref">16.1</a>.  <a href="#name-normative-references" class="internal xref">Normative References</a></p>
+</li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.16.2.2">
+                <p id="section-toc.1-1.16.2.2.1"><a href="#section-16.2" class="auto internal xref">16.2</a>.  <a href="#name-informative-references" class="internal xref">Informative References</a></p>
+</li>
+            </ul>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.17">
+            <p id="section-toc.1-1.17.1"><a href="#appendix-A" class="auto internal xref"></a><a href="#name-acknowledgments" class="internal xref">Acknowledgments</a></p>
+</li>
+          <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.18">
+            <p id="section-toc.1-1.18.1"><a href="#appendix-B" class="auto internal xref"></a><a href="#name-authors-address" class="internal xref">Author's Address</a></p>
+</li>
+        </ul>
+</nav>
+</section>
+</div>
+<div id="introduction">
+<section id="section-1">
+      <h2 id="name-introduction">
+<a href="#section-1" class="section-number selfRef">1. </a><a href="#name-introduction" class="section-name selfRef">Introduction</a>
+      </h2>
+<p id="section-1-1">The resumable upload protocol <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> lets a client continue an
+interrupted upload instead of starting over. Its state is a single
+offset: all bytes before the offset have been stored, and each append
+has to start exactly at that offset. <span><a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-resumable-upload-12#section-4.6" class="relref">Section 4.6</a> of [<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>
+forbids a client from transferring data for the same upload in
+parallel.<a href="#section-1-1" class="pilcrow">¶</a></p>
+<p id="section-1-2">Sequential transfer limits throughput. A single TCP or QUIC connection
+is limited by its congestion window and round-trip time, and streams
+multiplexed on one HTTP/2 or HTTP/3 connection share a single
+congestion controller. On long or lossy paths, one connection often
+uses a fraction of the available capacity. Sequential appends also add
+an idle round trip between appends, and one slow append delays
+everything after it.<a href="#section-1-2" class="pilcrow">¶</a></p>
+<p id="section-1-3">Parallel uploads are widely deployed, but only in service-specific
+forms. Cloud storage APIs, and the Concatenation extension of the tus
+protocol <span>[<a href="#TUS" class="cite xref">TUS</a>]</span>, upload parts as separate resources and join them at
+the end. There is no standard way to send parts of a single upload
+resource in parallel. The Byte Range PATCH draft <span>[<a href="#BYTERANGE" class="cite xref">BYTERANGE</a>]</span> mentions
+parallel uploads and leaves them for "a later document".<a href="#section-1-3" class="pilcrow">¶</a></p>
+<p id="section-1-4">This document defines such an extension for <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. A client
+asks for parallel mode when it creates the upload (<a href="#negotiation" class="auto internal xref">Section 4</a>) and
+then sends appends for different byte ranges at the same time, within a
+window (<a href="#appends" class="auto internal xref">Section 5</a>). The server reports which ranges it has in a new
+response field (<a href="#upload-received" class="auto internal xref">Section 6</a>), and <a href="#completion" class="auto internal xref">Section 7</a> says when the
+upload is complete. Requirements for servers and for intermediaries are
+in <a href="#server-reqs" class="auto internal xref">Section 10</a> and <a href="#intermediary-reqs" class="auto internal xref">Section 11</a>.<a href="#section-1-4" class="pilcrow">¶</a></p>
+<p id="section-1-5">Unless this document says otherwise (<a href="#updates" class="auto internal xref">Section 8</a>), all rules of
+<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> still apply. A client or server that does not implement
+this extension simply keeps using the sequential protocol.<a href="#section-1-5" class="pilcrow">¶</a></p>
+<div id="use-cases">
+<section id="section-1.1">
+        <h3 id="name-use-cases">
+<a href="#section-1.1" class="section-number selfRef">1.1. </a><a href="#name-use-cases" class="section-name selfRef">Use Cases</a>
+        </h3>
+<p id="section-1.1-1">The main motivation is large uploads over paths where a single
+connection cannot use the available bandwidth: video and audio, disk
+images and backups, and datasets or model files that often run to
+several gigabytes.<a href="#section-1.1-1" class="pilcrow">¶</a></p>
+<p id="section-1.1-2">Uploads to AI services are a growing case. Users attach documents,
+recordings, and video for a model to analyze, and the model cannot
+start until the upload has finished, so upload time shows up directly
+as waiting time. For small files the gain from parallel appends is
+small, because connection setup and round trips dominate. For large
+inputs it can be significant.<a href="#section-1.1-2" class="pilcrow">¶</a></p>
+<p id="section-1.1-3">The same trend affects organizations that inspect outbound uploads,
+including uploads to AI services, to keep sensitive data from leaving
+their networks. Their proxies have to handle more and larger uploads
+with limited memory, and must not let a file be committed before it
+has been checked. <a href="#inspecting" class="auto internal xref">Section 11.3</a> describes how they can do that.<a href="#section-1.1-3" class="pilcrow">¶</a></p>
+<p id="section-1.1-4">Mobile clients benefit as well. Their connections drop and change
+often, and with this extension only the missing ranges need to be sent
+again.<a href="#section-1.1-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="conventions-and-definitions">
+<section id="section-2">
+      <h2 id="name-conventions-and-definitions">
+<a href="#section-2" class="section-number selfRef">2. </a><a href="#name-conventions-and-definitions" class="section-name selfRef">Conventions and Definitions</a>
+      </h2>
+<p id="section-2-1">The key words "<span class="bcp14">MUST</span>", "<span class="bcp14">MUST NOT</span>", "<span class="bcp14">REQUIRED</span>", "<span class="bcp14">SHALL</span>", "<span class="bcp14">SHALL NOT</span>", "<span class="bcp14">SHOULD</span>", "<span class="bcp14">SHOULD NOT</span>", "<span class="bcp14">RECOMMENDED</span>", "<span class="bcp14">NOT RECOMMENDED</span>",
+"<span class="bcp14">MAY</span>", and "<span class="bcp14">OPTIONAL</span>" in this document are to be interpreted as
+described in BCP 14 <span>[<a href="#RFC2119" class="cite xref">RFC2119</a>]</span> <span>[<a href="#RFC8174" class="cite xref">RFC8174</a>]</span> when, and only when, they
+appear in all capitals, as shown here.<a href="#section-2-1" class="pilcrow">¶</a></p>
+<p id="section-2-2">This document uses the terms "upload resource", "append", "upload
+creation", "offset retrieval", and "upload cancellation" as defined in
+<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>, and the terms "client", "server", "intermediary",
+"proxy", and "gateway" as defined in <span>[<a href="#RFC9110" class="cite xref">RFC9110</a>]</span>. Structured Field
+types (Boolean, Integer, Token, List, Inner List, Dictionary) are
+defined in <span>[<a href="#RFC9651" class="cite xref">RFC9651</a>]</span>.<a href="#section-2-2" class="pilcrow">¶</a></p>
+<p id="section-2-3">The following terms are also used:<a href="#section-2-3" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlParallel" id="section-2-4">
+        <dt id="section-2-4.1">Parallel mode:</dt>
+        <dd style="margin-left: 1.5em" id="section-2-4.2">
+          <p id="section-2-4.2.1">The mode of an upload for which the extension defined in this
+document has been negotiated.<a href="#section-2-4.2.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-4.3">Contiguous offset (C):</dt>
+        <dd style="margin-left: 1.5em" id="section-2-4.4">
+          <p id="section-2-4.4.1">The number of bytes, starting at byte 0, that have been received
+without a gap. This is the value that <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> conveys in the
+Upload-Offset field.<a href="#section-2-4.4.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-4.5">Reorder window (W):</dt>
+        <dd style="margin-left: 1.5em" id="section-2-4.6">
+          <p id="section-2-4.6.1">The maximum distance, in bytes, beyond the contiguous offset at which
+an append may end. See <a href="#window" class="auto internal xref">Section 5.1</a>.<a href="#section-2-4.6.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-4.7">Received ranges:</dt>
+        <dd style="margin-left: 1.5em" id="section-2-4.8">
+          <p id="section-2-4.8.1">The set of byte ranges of the upload that the server has received and
+stored.<a href="#section-2-4.8.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-4.9">Tail append:</dt>
+        <dd style="margin-left: 1.5em" id="section-2-4.10">
+          <p id="section-2-4.10.1">An append that ends at the upload length and carries Upload-Complete
+set to true. Without it the upload cannot complete.<a href="#section-2-4.10.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+<dt id="section-2-4.11">Inspecting intermediary:</dt>
+        <dd style="margin-left: 1.5em" id="section-2-4.12">
+          <p id="section-2-4.12.1">An intermediary that examines the content of an upload before
+allowing it to reach or be committed at the server, typically to
+apply data loss prevention (DLP) or malware scanning policy.<a href="#section-2-4.12.1" class="pilcrow">¶</a></p>
+</dd>
+      <dd class="break"></dd>
+</dl>
+<p id="section-2-5">Byte ranges in this document are written as [start, end), meaning the
+range includes start and excludes end. "MiB" means 1,048,576 bytes.<a href="#section-2-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="overview">
+<section id="section-3">
+      <h2 id="name-overview">
+<a href="#section-3" class="section-number selfRef">3. </a><a href="#name-overview" class="section-name selfRef">Overview</a>
+      </h2>
+<p id="section-3-1">A client asks for parallel mode when it creates an upload. The server,
+and any intermediary on the path, answer with the limits they accept:
+how many appends may be in progress at once and how large the reorder
+window is. Intermediaries can only make these limits stricter.<a href="#section-3-1" class="pilcrow">¶</a></p>
+<p id="section-3-2">The client then sends several appends at the same time, each covering
+its own byte range. Every append has to end within the reorder window,
+which starts at the contiguous offset. As gaps at the start of the
+window fill, the contiguous offset advances and the window slides
+forward. The server reports the ranges it holds in the Upload-Received
+field, so a client that loses an append re-sends only the missing
+range. The upload completes when the received ranges cover the whole
+upload.<a href="#section-3-2" class="pilcrow">¶</a></p>
+<span id="name-the-reorder-window"></span><div id="fig-window">
+<figure id="figure-1">
+        <div class="alignLeft art-ascii-art art-text artwork" id="section-3-3.1">
+<pre>
+ 0                 C                              C+W        Length
+ |=================|----+=====+------+=====+------|----------|
+   all received     gap  recv   gap    recv  gap    outside
+                   |&lt;------ reorder window ------&gt;|  window
+</pre>
+</div>
+<figcaption><a href="#figure-1" class="selfRef">Figure 1</a>:
+<a href="#name-the-reorder-window" class="selfRef">The Reorder Window</a>
+        </figcaption></figure>
+</div>
+<p id="section-3-4"><a href="#fig-overview" class="auto internal xref">Figure 2</a> shows a 12 MiB upload sent as 2 MiB appends with a
+window of 6 MiB and at most three appends in progress.<a href="#section-3-4" class="pilcrow">¶</a></p>
+<span id="name-parallel-upload-overview"></span><div id="fig-overview">
+<figure id="figure-2">
+        <div class="alignLeft art-ascii-art art-text artwork" id="section-3-5.1">
+<pre>
+Client                                   Server
+  |  POST /files                            |
+  |  Upload-Parallel: ?1                    |
+  |  Upload-Length: 12582912                |
+  |----------------------------------------&gt;|
+  |  201 Created                            |
+  |  Location: /uploads/abc                 |
+  |  Upload-Limit: max-parallel=3,          |
+  |                reorder-window=6291456   |
+  |&lt;----------------------------------------|
+  |  PATCH, Upload-Offset: 0         ------&gt;|  \
+  |  PATCH, Upload-Offset: 2097152   ------&gt;|   &gt; concurrent,
+  |  PATCH, Upload-Offset: 4194304   ------&gt;|  /  window [0, 6 MiB)
+  |&lt;------------------ 204 (three times) ---|
+  |  PATCH, Upload-Offset: 6291456   ------&gt;|  \
+  |  PATCH, Upload-Offset: 8388608   ------&gt;|   &gt; window slid to
+  |  PATCH, Upload-Offset: 10485760  ------&gt;|  /  [6 MiB, 12 MiB)
+  |         Upload-Complete: ?1             |
+  |&lt;----------- 204, 204, 201 Created ------|  upload complete
+</pre>
+</div>
+<figcaption><a href="#figure-2" class="selfRef">Figure 2</a>:
+<a href="#name-parallel-upload-overview" class="selfRef">Parallel Upload Overview</a>
+        </figcaption></figure>
+</div>
+<p id="section-3-6">Inspecting intermediaries use the same window to process content in
+order with bounded memory, and hold the tail append until they reach a
+verdict (<a href="#inspecting" class="auto internal xref">Section 11.3</a>).<a href="#section-3-6" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="negotiation">
+<section id="section-4">
+      <h2 id="name-negotiating-parallel-mode">
+<a href="#section-4" class="section-number selfRef">4. </a><a href="#name-negotiating-parallel-mode" class="section-name selfRef">Negotiating Parallel Mode</a>
+      </h2>
+<div id="upload-parallel">
+<section id="section-4.1">
+        <h3 id="name-the-upload-parallel-request">
+<a href="#section-4.1" class="section-number selfRef">4.1. </a><a href="#name-the-upload-parallel-request" class="section-name selfRef">The Upload-Parallel Request Field</a>
+        </h3>
+<p id="section-4.1-1">The Upload-Parallel request header field is a Boolean <span>[<a href="#RFC9651" class="cite xref">RFC9651</a>]</span>. A
+client sends it with the value true in an upload creation request to
+ask for parallel mode:<a href="#section-4.1-1" class="pilcrow">¶</a></p>
+<div class="lang-http-message sourcecode" id="section-4.1-2">
+<pre>
+Upload-Parallel: ?1
+</pre><a href="#section-4.1-2" class="pilcrow">¶</a>
+</div>
+<p id="section-4.1-3">A client that sends Upload-Parallel with the value true <span class="bcp14">MUST</span> also send
+Upload-Length in the same request. Parallel mode requires the total
+length to be known before appends arrive out of order. A server that
+receives Upload-Parallel without Upload-Length <span class="bcp14">MUST</span> treat the upload as
+sequential.<a href="#section-4.1-3" class="pilcrow">¶</a></p>
+<p id="section-4.1-4">A client <span class="bcp14">MAY</span> create the upload with an empty body (Upload-Complete set
+to false and no content) so that it learns the upload resource and the
+limits before it sends any data. This is <span class="bcp14">RECOMMENDED</span> when HTTP/1.1 is
+used (<a href="#http11" class="auto internal xref">Section 12.2</a>).<a href="#section-4.1-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="limits">
+<section id="section-4.2">
+        <h3 id="name-upload-limit-parameters">
+<a href="#section-4.2" class="section-number selfRef">4.2. </a><a href="#name-upload-limit-parameters" class="section-name selfRef">Upload-Limit Parameters</a>
+        </h3>
+<p id="section-4.2-1">This document defines the following parameters for the Upload-Limit
+response field of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>:<a href="#section-4.2-1" class="pilcrow">¶</a></p>
+<span class="break"></span><dl class="dlNewline" id="section-4.2-2">
+          <dt id="section-4.2-2.1">max-parallel:</dt>
+          <dd style="margin-left: 1.5em" id="section-4.2-2.2">
+            <p id="section-4.2-2.2.1">An Integer. The maximum number of appends to this upload that may be
+in progress at the same time. A value of 1, or the absence of the
+parameter, means the upload is sequential.<a href="#section-4.2-2.2.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-4.2-2.3">reorder-window:</dt>
+          <dd style="margin-left: 1.5em" id="section-4.2-2.4">
+            <p id="section-4.2-2.4.1">An Integer. The reorder window W in bytes. If absent while
+max-parallel is greater than 1, the window is unlimited, that is,
+equal to the upload length.<a href="#section-4.2-2.4.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-4.2-2.5">append-alignment:</dt>
+          <dd style="margin-left: 1.5em" id="section-4.2-2.6">
+            <p id="section-4.2-2.6.1">An Integer. The offset of every append, and the length of every
+append except the tail append, <span class="bcp14">MUST</span> be a multiple of this value. If
+absent, no alignment applies.<a href="#section-4.2-2.6.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+<dt id="section-4.2-2.7">commit:</dt>
+          <dd style="margin-left: 1.5em" id="section-4.2-2.8">
+            <p id="section-4.2-2.8.1">A Token, either "auto" or "explicit". See <a href="#completion" class="auto internal xref">Section 7</a>. If absent,
+the value is "auto".<a href="#section-4.2-2.8.1" class="pilcrow">¶</a></p>
+</dd>
+        <dd class="break"></dd>
+</dl>
+<p id="section-4.2-3">A server that accepts parallel mode <span class="bcp14">MUST</span> include max-parallel with a
+value greater than 1 in the Upload-Limit field of the upload creation
+response and of every offset retrieval response.<a href="#section-4.2-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="tightening">
+<section id="section-4.3">
+        <h3 id="name-tightening-by-intermediarie">
+<a href="#section-4.3" class="section-number selfRef">4.3. </a><a href="#name-tightening-by-intermediarie" class="section-name selfRef">Tightening by Intermediaries</a>
+        </h3>
+<p id="section-4.3-1">An intermediary <span class="bcp14">MAY</span> modify the Upload-Limit field in a response it
+forwards, but only in ways that make the limits stricter:<a href="#section-4.3-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-4.3-2.1">
+            <p id="section-4.3-2.1.1">it <span class="bcp14">MAY</span> lower max-parallel, including to 1;<a href="#section-4.3-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-4.3-2.2">
+            <p id="section-4.3-2.2.1">it <span class="bcp14">MAY</span> lower reorder-window, or add it if absent;<a href="#section-4.3-2.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-4.3-2.3">
+            <p id="section-4.3-2.3.1">it <span class="bcp14">MAY</span> replace append-alignment with a multiple of the current value,
+or add it if absent;<a href="#section-4.3-2.3.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-4.3-2.4">
+            <p id="section-4.3-2.4.1">it <span class="bcp14">MAY</span> change commit from "auto" to "explicit".<a href="#section-4.3-2.4.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-4.3-3">An intermediary <span class="bcp14">MUST NOT</span> raise max-parallel or reorder-window, remove
+any of these parameters, or change commit from "explicit" to "auto".
+Because each hop can only tighten the limits, the values a client
+receives are the strictest on the path.<a href="#section-4.3-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="fallback">
+<section id="section-4.4">
+        <h3 id="name-falling-back-to-sequential-">
+<a href="#section-4.4" class="section-number selfRef">4.4. </a><a href="#name-falling-back-to-sequential-" class="section-name selfRef">Falling Back to Sequential Uploads</a>
+        </h3>
+<p id="section-4.4-1">The upload is in parallel mode only if the client sent Upload-Parallel
+with the value true and the response to upload creation contains
+max-parallel greater than 1. Otherwise, client and server <span class="bcp14">MUST</span> follow
+<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> without the changes in this document. Limits can also
+tighten later: a client <span class="bcp14">MUST</span> apply the values from the most recent
+offset retrieval or append response.<a href="#section-4.4-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="appends">
+<section id="section-5">
+      <h2 id="name-parallel-appends">
+<a href="#section-5" class="section-number selfRef">5. </a><a href="#name-parallel-appends" class="section-name selfRef">Parallel Appends</a>
+      </h2>
+<div id="window">
+<section id="section-5.1">
+        <h3 id="name-the-reorder-window-2">
+<a href="#section-5.1" class="section-number selfRef">5.1. </a><a href="#name-the-reorder-window-2" class="section-name selfRef">The Reorder Window</a>
+        </h3>
+<p id="section-5.1-1">Let C be the contiguous offset, L the upload length, and W the reorder
+window. In parallel mode, an append that covers bytes [o, o + n),
+where n is the length of its content, is inside the window if and only
+if:<a href="#section-5.1-1" class="pilcrow">¶</a></p>
+<div class="alignLeft art-ascii-art art-text artwork" id="section-5.1-2">
+<pre>
+    o + n &lt;= min(C + W, L)
+</pre><a href="#section-5.1-2" class="pilcrow">¶</a>
+</div>
+<p id="section-5.1-3">A client <span class="bcp14">MUST NOT</span> start an append that is outside the window as
+computed from the most recent Upload-Offset it has received. Because C
+only grows, an append that was inside the window when it started stays
+inside it.<a href="#section-5.1-3" class="pilcrow">¶</a></p>
+<p id="section-5.1-4">A window equal to L allows unrestricted parallelism. A window equal to
+the size of one append results in sequential behavior while still
+permitting a new append to start as soon as the previous one
+completes.<a href="#section-5.1-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="append-requests">
+<section id="section-5.2">
+        <h3 id="name-append-requests">
+<a href="#section-5.2" class="section-number selfRef">5.2. </a><a href="#name-append-requests" class="section-name selfRef">Append Requests</a>
+        </h3>
+<p id="section-5.2-1">Appends in parallel mode use the PATCH method and the
+application/partial-upload media type, as defined in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. The
+Upload-Offset request field carries the offset o at which the content
+starts; the content length gives n.<a href="#section-5.2-1" class="pilcrow">¶</a></p>
+<p id="section-5.2-2">In parallel mode, Upload-Offset in an append request is not required to
+equal the server's current offset. It is the start of the byte range
+the append writes. A client <span class="bcp14">MUST</span> send Content-Length on every append in
+parallel mode, so that a recipient knows the full range before the
+content arrives.<a href="#section-5.2-2" class="pilcrow">¶</a></p>
+<p id="section-5.2-3">A client <span class="bcp14">MUST NOT</span> have more than max-parallel appends to the same
+upload in progress at once. An append is in progress from when its
+request starts until its response is received or the request is
+abandoned.<a href="#section-5.2-3" class="pilcrow">¶</a></p>
+<p id="section-5.2-4">A client <span class="bcp14">SHOULD</span> include a Content-Digest field <span>[<a href="#RFC9530" class="cite xref">RFC9530</a>]</span> on each
+append so that the server and intermediaries can verify each range on
+its own.<a href="#section-5.2-4" class="pilcrow">¶</a></p>
+<div class="lang-http-message sourcecode" id="section-5.2-5">
+<pre>
+PATCH /uploads/abc HTTP/1.1
+Host: example.com
+Content-Type: application/partial-upload
+Upload-Offset: 4194304
+Upload-Complete: ?0
+Content-Length: 2097152
+Content-Digest: sha-256=:(base64 digest):
+
+[2097152 bytes]
+</pre><a href="#section-5.2-5" class="pilcrow">¶</a>
+</div>
+</section>
+</div>
+<div id="overlap">
+<section id="section-5.3">
+        <h3 id="name-overlapping-and-repeated-ra">
+<a href="#section-5.3" class="section-number selfRef">5.3. </a><a href="#name-overlapping-and-repeated-ra" class="section-name selfRef">Overlapping and Repeated Ranges</a>
+        </h3>
+<p id="section-5.3-1">An append may overlap ranges the server has already received, for
+example when a client retries an append whose response it did not
+receive. Retrying a range with identical content is always safe.<a href="#section-5.3-1" class="pilcrow">¶</a></p>
+<p id="section-5.3-2">A server <span class="bcp14">MAY</span> discard overlapping bytes without comparing them. If a
+server detects that overlapping bytes differ from the stored bytes
+(using Content-Digest, say), it <span class="bcp14">MUST</span> reject the append with status 409
+(Conflict) and the problem type "range-conflict" (<a href="#problems" class="auto internal xref">Section 13</a>).<a href="#section-5.3-2" class="pilcrow">¶</a></p>
+<p id="section-5.3-3">If a new append overlaps a range that is being written by an append
+still in progress, the server <span class="bcp14">SHOULD</span> terminate the older append before
+processing the new one. This applies the rule of
+<span><a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-resumable-upload-12#section-4.6" class="relref">Section 4.6</a> of [<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> per byte range instead of per upload: the
+newer request is taken to be a retry of the older one. Bytes the older
+append stored before termination remain received.<a href="#section-5.3-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="interrupted">
+<section id="section-5.4">
+        <h3 id="name-interrupted-appends">
+<a href="#section-5.4" class="section-number selfRef">5.4. </a><a href="#name-interrupted-appends" class="section-name selfRef">Interrupted Appends</a>
+        </h3>
+<p id="section-5.4-1">When an append is interrupted, the server <span class="bcp14">MAY</span> keep the bytes it
+received as a received range, as in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. In parallel mode,
+this can leave a gap after the kept bytes. The client learns about the
+gap through offset retrieval (<a href="#upload-received" class="auto internal xref">Section 6</a>) and re-sends only
+the missing bytes.<a href="#section-5.4-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="upload-received">
+<section id="section-6">
+      <h2 id="name-reporting-received-ranges">
+<a href="#section-6" class="section-number selfRef">6. </a><a href="#name-reporting-received-ranges" class="section-name selfRef">Reporting Received Ranges</a>
+      </h2>
+<p id="section-6-1">The Upload-Received response header field is a List of Inner Lists
+<span>[<a href="#RFC9651" class="cite xref">RFC9651</a>]</span>. Each Inner List contains exactly two Integers, the start
+and end of a received range [start, end):<a href="#section-6-1" class="pilcrow">¶</a></p>
+<div class="lang-http-message sourcecode" id="section-6-2">
+<pre>
+Upload-Offset: 1048576
+Upload-Received: (0 1048576), (2097152 6291456)
+</pre><a href="#section-6-2" class="pilcrow">¶</a>
+</div>
+<p id="section-6-3">The ranges <span class="bcp14">MUST</span> be listed in ascending order and <span class="bcp14">MUST NOT</span> overlap or
+touch; adjacent ranges are merged. If the contiguous offset is greater
+than 0, the first range starts at 0 and ends at the contiguous offset.<a href="#section-6-3" class="pilcrow">¶</a></p>
+<p id="section-6-4">In parallel mode, a server <span class="bcp14">MUST</span> include Upload-Received in every offset
+retrieval response and <span class="bcp14">SHOULD</span> include it in responses to appends. The
+Upload-Offset field keeps the meaning defined in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>: it is
+the contiguous offset, and it never decreases.<a href="#section-6-4" class="pilcrow">¶</a></p>
+<p id="section-6-5">A server <span class="bcp14">MUST NOT</span> list a range it has not stored. A server <span class="bcp14">MAY</span> omit
+ranges beyond the contiguous offset, for example to limit the size of
+the field; the client then re-sends those bytes, which is safe
+(<a href="#overlap" class="auto internal xref">Section 5.3</a>).<a href="#section-6-5" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="completion">
+<section id="section-7">
+      <h2 id="name-upload-completion">
+<a href="#section-7" class="section-number selfRef">7. </a><a href="#name-upload-completion" class="section-name selfRef">Upload Completion</a>
+      </h2>
+<p id="section-7-1">In parallel mode an upload is complete when its received ranges cover
+[0, L) and the server has received the tail append. The tail append is
+the append that carries Upload-Complete with the value true. Every
+other append <span class="bcp14">MUST</span> carry Upload-Complete with the value false.<a href="#section-7-1" class="pilcrow">¶</a></p>
+<div id="commit-auto">
+<section id="section-7.1">
+        <h3 id="name-automatic-commit">
+<a href="#section-7.1" class="section-number selfRef">7.1. </a><a href="#name-automatic-commit" class="section-name selfRef">Automatic Commit</a>
+        </h3>
+<p id="section-7.1-1">When commit is "auto", the tail append is the data append that ends at
+L. A client <span class="bcp14">MUST</span> set Upload-Complete to true on the append that ends at
+L and on no other append. A server that receives Upload-Complete set to
+true on an append that does not end at L <span class="bcp14">MUST</span> reject it with status 400
+(Bad Request).<a href="#section-7.1-1" class="pilcrow">¶</a></p>
+<p id="section-7.1-2">If gaps remain when the tail append has been received, the server
+responds to the tail append with 204 (No Content) and the current
+Upload-Offset and Upload-Received. The upload completes when the last
+gap is filled. The append that fills it receives the final response for
+the upload, as described in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. Other appends receive 204
+(No Content).<a href="#section-7.1-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="commit-explicit">
+<section id="section-7.2">
+        <h3 id="name-explicit-commit">
+<a href="#section-7.2" class="section-number selfRef">7.2. </a><a href="#name-explicit-commit" class="section-name selfRef">Explicit Commit</a>
+        </h3>
+<p id="section-7.2-1">When commit is "explicit", every data append, including the one that
+ends at L, carries Upload-Complete set to false. After the client has
+received successful responses for all ranges, it sends an append with
+empty content, Upload-Offset set to L, and Upload-Complete set to true.
+That empty append is the tail append and receives the final response.<a href="#section-7.2-1" class="pilcrow">¶</a></p>
+<p id="section-7.2-2">If the server receives the tail append while gaps remain, it <span class="bcp14">MUST</span>
+reject it with status 409 (Conflict), the problem type
+"incomplete-ranges", and the Upload-Received field.<a href="#section-7.2-2" class="pilcrow">¶</a></p>
+<p id="section-7.2-3">Explicit commit separates receiving the data from committing it. It
+lets a client check the whole representation, using Repr-Digest
+<span>[<a href="#RFC9530" class="cite xref">RFC9530</a>]</span>, before committing. It also keeps the tail append small,
+which helps intermediaries that hold it (<a href="#hold-tail" class="auto internal xref">Section 11.3.3</a>).<a href="#section-7.2-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="updates">
+<section id="section-8">
+      <h2 id="name-changes-to-resumable-upload">
+<a href="#section-8" class="section-number selfRef">8. </a><a href="#name-changes-to-resumable-upload" class="section-name selfRef">Changes to Resumable Upload Rules in Parallel Mode</a>
+      </h2>
+<p id="section-8-1">For uploads in parallel mode only, this document changes the following
+rules of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. Section numbers refer to draft version 12. All
+other rules apply unchanged.<a href="#section-8-1" class="pilcrow">¶</a></p>
+<span id="name-rules-changed-in-parallel-m"></span><div id="tab-updates">
+<table class="center" id="table-1">
+        <caption>
+<a href="#table-1" class="selfRef">Table 1</a>:
+<a href="#name-rules-changed-in-parallel-m" class="selfRef">Rules Changed in Parallel Mode</a>
+        </caption>
+<thead>
+          <tr>
+            <th class="text-left" rowspan="1" colspan="1">Rule in RESUMABLE</th>
+            <th class="text-left" rowspan="1" colspan="1">Change in parallel mode</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">Section 4.6: a client must not transfer data for one upload in parallel</td>
+            <td class="text-left" rowspan="1" colspan="1">Up to max-parallel appends may be in progress (<a href="#append-requests" class="auto internal xref">Section 5.2</a>).</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">Section 4.6: a new request terminates the older one</td>
+            <td class="text-left" rowspan="1" colspan="1">Applies per overlapping byte range (<a href="#overlap" class="auto internal xref">Section 5.3</a>).</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">Section 4.4.2: Upload-Offset must match the current offset, otherwise 409</td>
+            <td class="text-left" rowspan="1" colspan="1">Any append inside the reorder window is accepted (<a href="#window" class="auto internal xref">Section 5.1</a>).</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">Upload-Complete marks the final append</td>
+            <td class="text-left" rowspan="1" colspan="1">Marks the tail append; completion requires full coverage (<a href="#completion" class="auto internal xref">Section 7</a>).</td>
+          </tr>
+        </tbody>
+      </table>
+</div>
+<p id="section-8-3"><span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> is sequential for a good reason. Without negotiation, a
+server cannot tell a deliberate concurrent append from a stale request
+that the client gave up on, such as one left behind on a half-open
+connection. Negotiating parallel mode removes that ambiguity, and
+applying the termination rule per range keeps the protection against
+stale requests.<a href="#section-8-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="client-reqs">
+<section id="section-9">
+      <h2 id="name-client-behavior">
+<a href="#section-9" class="section-number selfRef">9. </a><a href="#name-client-behavior" class="section-name selfRef">Client Behavior</a>
+      </h2>
+<ul class="normal">
+<li class="normal" id="section-9-1.1">
+          <p id="section-9-1.1.1">A client <span class="bcp14">SHOULD</span> choose append sizes that are multiples of
+append-alignment and small enough that several fit inside the reorder
+window.<a href="#section-9-1.1.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-9-1.2">
+          <p id="section-9-1.2.1">A client <span class="bcp14">SHOULD</span> keep the append that starts at the contiguous offset
+in progress at all times, because the window cannot slide until that
+range arrives.<a href="#section-9-1.2.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-9-1.3">
+          <p id="section-9-1.3.1">If the append at the contiguous offset is much slower than the
+others, a client <span class="bcp14">MAY</span> send the same range again on another stream or
+connection and cancel the other copy when one finishes. Both copies
+count against max-parallel while in progress.<a href="#section-9-1.3.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-9-1.4">
+          <p id="section-9-1.4.1">After any failed or abandoned append, a client <span class="bcp14">SHOULD</span> perform offset
+retrieval and re-send only ranges missing from Upload-Received.<a href="#section-9-1.4.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-9-1.5">
+          <p id="section-9-1.5.1">A client that receives status 409 with the problem type
+"offset-outside-window" <span class="bcp14">MUST</span> wait until the contiguous offset has
+advanced before retrying that range.<a href="#section-9-1.5.1" class="pilcrow">¶</a></p>
+</li>
+        <li class="normal" id="section-9-1.6">
+          <p id="section-9-1.6.1">A client <span class="bcp14">SHOULD</span> send Repr-Digest <span>[<a href="#RFC9530" class="cite xref">RFC9530</a>]</span> for the whole
+representation, either at upload creation or on the tail append.<a href="#section-9-1.6.1" class="pilcrow">¶</a></p>
+</li>
+      </ul>
+</section>
+</div>
+<div id="server-reqs">
+<section id="section-10">
+      <h2 id="name-server-requirements">
+<a href="#section-10" class="section-number selfRef">10. </a><a href="#name-server-requirements" class="section-name selfRef">Server Requirements</a>
+      </h2>
+<div id="server-state">
+<section id="section-10.1">
+        <h3 id="name-upload-state">
+<a href="#section-10.1" class="section-number selfRef">10.1. </a><a href="#name-upload-state" class="section-name selfRef">Upload State</a>
+        </h3>
+<p id="section-10.1-1">A server that supports parallel mode <span class="bcp14">MUST</span> track the received ranges of
+each upload in parallel mode, and update them atomically: a range is
+either fully recorded or not recorded at all. Offset retrieval
+responses <span class="bcp14">MUST</span> reflect every range recorded before the request was
+received.<a href="#section-10.1-1" class="pilcrow">¶</a></p>
+<p id="section-10.1-2">When requests for one upload can reach different server instances, for
+example behind a load balancer, all instances <span class="bcp14">MUST</span> share a consistent
+view of the received ranges, or requests for an upload <span class="bcp14">MUST</span> be routed
+to a single instance.<a href="#section-10.1-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="server-window">
+<section id="section-10.2">
+        <h3 id="name-enforcing-limits">
+<a href="#section-10.2" class="section-number selfRef">10.2. </a><a href="#name-enforcing-limits" class="section-name selfRef">Enforcing Limits</a>
+        </h3>
+<p id="section-10.2-1">A server <span class="bcp14">MUST</span> reject an append that is outside the reorder window with
+status 409 (Conflict), the problem type "offset-outside-window", and
+the current Upload-Offset, unless it delays the append as described in
+<a href="#h2h3-flow" class="auto internal xref">Section 12.1.2</a>.<a href="#section-10.2-1" class="pilcrow">¶</a></p>
+<p id="section-10.2-2">A server <span class="bcp14">MAY</span> reject an append that exceeds max-parallel with status 429
+(Too Many Requests), the problem type "too-many-parallel", and a
+Retry-After field.<a href="#section-10.2-2" class="pilcrow">¶</a></p>
+<p id="section-10.2-3">A server <span class="bcp14">MUST</span> reject an append whose offset or length violates
+append-alignment with status 400 (Bad Request) and the problem type
+"misaligned-append".<a href="#section-10.2-3" class="pilcrow">¶</a></p>
+<p id="section-10.2-4">A server <span class="bcp14">MAY</span> lower its limits during an upload, for example under load,
+and signals new values in its next responses. It <span class="bcp14">MUST NOT</span> reject an
+append that was inside the limits it last advertised when the append
+started solely because the limits changed.<a href="#section-10.2-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="server-storage">
+<section id="section-10.3">
+        <h3 id="name-storage-and-visibility">
+<a href="#section-10.3" class="section-number selfRef">10.3. </a><a href="#name-storage-and-visibility" class="section-name selfRef">Storage and Visibility</a>
+        </h3>
+<p id="section-10.3-1">A server <span class="bcp14">MAY</span> write ranges directly into a single sparse object or store
+them separately and join them on completion. The choice is not visible
+to clients.<a href="#section-10.3-1" class="pilcrow">¶</a></p>
+<p id="section-10.3-2">Until an upload is complete, a server <span class="bcp14">MUST NOT</span> make its content
+available as the representation of any target resource, and <span class="bcp14">MUST NOT</span>
+fill gaps with placeholder bytes that could be mistaken for uploaded
+content. An upload that is cancelled or expires <span class="bcp14">MUST</span> be discarded
+without being committed.<a href="#section-10.3-2" class="pilcrow">¶</a></p>
+<p id="section-10.3-3">If a Repr-Digest was provided, the server <span class="bcp14">SHOULD</span> verify it against the
+joined content before committing and <span class="bcp14">MUST NOT</span> commit on a mismatch.<a href="#section-10.3-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="server-resources">
+<section id="section-10.4">
+        <h3 id="name-resource-management">
+<a href="#section-10.4" class="section-number selfRef">10.4. </a><a href="#name-resource-management" class="section-name selfRef">Resource Management</a>
+        </h3>
+<p id="section-10.4-1">The reorder window bounds how much out-of-order data a server has to
+buffer per upload. A server that buffers in memory <span class="bcp14">SHOULD</span> choose
+reorder-window and max-parallel according to its memory budget, and
+<span class="bcp14">SHOULD</span> also limit the number of concurrent uploads per client.<a href="#section-10.4-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="intermediary-reqs">
+<section id="section-11">
+      <h2 id="name-intermediary-requirements">
+<a href="#section-11" class="section-number selfRef">11. </a><a href="#name-intermediary-requirements" class="section-name selfRef">Intermediary Requirements</a>
+      </h2>
+<div id="all-intermediaries">
+<section id="section-11.1">
+        <h3 id="name-all-intermediaries">
+<a href="#section-11.1" class="section-number selfRef">11.1. </a><a href="#name-all-intermediaries" class="section-name selfRef">All Intermediaries</a>
+        </h3>
+<p id="section-11.1-1">Appends in parallel mode are ordinary HTTP requests. An intermediary
+that does not implement this document forwards them without change,
+and parallel mode works through it.<a href="#section-11.1-1" class="pilcrow">¶</a></p>
+<p id="section-11.1-2">An intermediary that implements this document:<a href="#section-11.1-2" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-11.1-3.1">
+            <p id="section-11.1-3.1.1"><span class="bcp14">MAY</span> tighten Upload-Limit as described in <a href="#tightening" class="auto internal xref">Section 4.3</a>, and <span class="bcp14">MUST NOT</span> loosen it;<a href="#section-11.1-3.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-11.1-3.2">
+            <p id="section-11.1-3.2.1"><span class="bcp14">MAY</span> force sequential behavior by removing Upload-Parallel from an
+upload creation request or by setting max-parallel to 1 in the
+response;<a href="#section-11.1-3.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-11.1-3.3">
+            <p id="section-11.1-3.3.1"><span class="bcp14">MUST NOT</span> remove or alter Upload-Received, except as described in
+<a href="#hold-tail-retrieval" class="auto internal xref">Section 11.3.4</a>;<a href="#section-11.1-3.3.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-11.1-3.4">
+            <p id="section-11.1-3.4.1">when it balances load across servers, <span class="bcp14">MUST</span> meet the consistency
+requirement of <a href="#server-state" class="auto internal xref">Section 10.1</a>, for example by routing all requests
+for an upload resource to the same server.<a href="#section-11.1-3.4.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-11.1-4">Responses to appends and to offset retrieval are not cacheable, as
+specified in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>; this is unchanged.<a href="#section-11.1-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="translation">
+<section id="section-11.2">
+        <h3 id="name-terminating-parallel-mode-a">
+<a href="#section-11.2" class="section-number selfRef">11.2. </a><a href="#name-terminating-parallel-mode-a" class="section-name selfRef">Terminating Parallel Mode at an Intermediary</a>
+        </h3>
+<p id="section-11.2-1">An intermediary <span class="bcp14">MAY</span> accept parallel mode from clients while forwarding
+the upload to the server sequentially, for example because the server
+does not support this extension or is reached over a different HTTP
+version. Such an intermediary acts as the server for parallel mode on
+the client-facing hop: it <span class="bcp14">MUST</span> meet the requirements of
+<a href="#server-reqs" class="auto internal xref">Section 10</a> for that hop, buffer out-of-order data within the
+window it advertises, and forward bytes upstream in order as the
+contiguous offset advances.<a href="#section-11.2-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="inspecting">
+<section id="section-11.3">
+        <h3 id="name-inspecting-intermediaries">
+<a href="#section-11.3" class="section-number selfRef">11.3. </a><a href="#name-inspecting-intermediaries" class="section-name selfRef">Inspecting Intermediaries</a>
+        </h3>
+<p id="section-11.3-1">An inspecting intermediary examines upload content before it reaches,
+or is committed at, the server. Such intermediaries only see content
+where they already terminate TLS, usually under an enterprise policy.
+This document does not change that.<a href="#section-11.3-1" class="pilcrow">¶</a></p>
+<div id="in-order">
+<section id="section-11.3.1">
+          <h4 id="name-in-order-processing">
+<a href="#section-11.3.1" class="section-number selfRef">11.3.1. </a><a href="#name-in-order-processing" class="section-name selfRef">In-Order Processing</a>
+          </h4>
+<p id="section-11.3.1-1">Many inspection engines need content in order: file types are
+recognized from the first bytes, and patterns can span append
+boundaries. An inspecting intermediary that processes content in
+order:<a href="#section-11.3.1-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-11.3.1-2.1">
+              <p id="section-11.3.1-2.1.1"><span class="bcp14">SHOULD</span> advertise a reorder-window no larger than the buffer it can
+dedicate to the upload;<a href="#section-11.3.1-2.1.1" class="pilcrow">¶</a></p>
+</li>
+            <li class="normal" id="section-11.3.1-2.2">
+              <p id="section-11.3.1-2.2.1">buffers appends that arrive ahead of the contiguous offset and passes
+bytes to its engines in order as gaps fill;<a href="#section-11.3.1-2.2.1" class="pilcrow">¶</a></p>
+</li>
+            <li class="normal" id="section-11.3.1-2.3">
+              <p id="section-11.3.1-2.3.1"><span class="bcp14">MUST NOT</span> evaluate appends only in isolation when its policy can match
+content that spans appends;<a href="#section-11.3.1-2.3.1" class="pilcrow">¶</a></p>
+</li>
+            <li class="normal" id="section-11.3.1-2.4">
+              <p id="section-11.3.1-2.4.1"><span class="bcp14">MAY</span> use Content-Digest to recognize a retried range it has already
+inspected and skip inspecting it again.<a href="#section-11.3.1-2.4.1" class="pilcrow">¶</a></p>
+</li>
+          </ul>
+<p id="section-11.3.1-3">Some formats can only be analyzed as a whole, such as archives that
+keep their index at the end. For those, an intermediary <span class="bcp14">MAY</span> set
+reorder-window to the upload length and inspect the complete content
+before releasing the tail.<a href="#section-11.3.1-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="forwarding">
+<section id="section-11.3.2">
+          <h4 id="name-forwarding-strategies">
+<a href="#section-11.3.2" class="section-number selfRef">11.3.2. </a><a href="#name-forwarding-strategies" class="section-name selfRef">Forwarding Strategies</a>
+          </h4>
+<p id="section-11.3.2-1">The <span class="bcp14">RECOMMENDED</span> approach is to forward every append as soon as it
+arrives, inspect the content in order alongside, and hold back only the
+tail append until there is a verdict (<a href="#hold-tail" class="auto internal xref">Section 11.3.3</a>). Upload throughput
+is unaffected; the only added delay is the time needed to inspect the
+last data received.<a href="#section-11.3.2-1" class="pilcrow">¶</a></p>
+<p id="section-11.3.2-2">An intermediary that does not want the server to store uninspected
+bytes at all can instead forward each range only after inspecting it,
+at the cost of more delay. It can also forward the upload sequentially,
+as described in <a href="#translation" class="auto internal xref">Section 11.2</a>.<a href="#section-11.3.2-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="hold-tail">
+<section id="section-11.3.3">
+          <h4 id="name-holding-the-tail-append">
+<a href="#section-11.3.3" class="section-number selfRef">11.3.3. </a><a href="#name-holding-the-tail-append" class="section-name selfRef">Holding the Tail Append</a>
+          </h4>
+<p id="section-11.3.3-1">Whatever forwarding strategy it uses, an inspecting intermediary <span class="bcp14">MUST NOT</span> forward the tail append to the server before its verdict for the
+upload is that the content is allowed. Since a server cannot complete
+an upload without its tail append (<a href="#completion" class="auto internal xref">Section 7</a>), this is enough to
+keep uninspected content from being committed, even if the server
+knows nothing about inspection or about this document.<a href="#section-11.3.3-1" class="pilcrow">¶</a></p>
+<p id="section-11.3.3-2">The intermediary always knows which append is the tail: it carries
+Upload-Complete set to true and, with automatic commit, ends at the
+upload length.<a href="#section-11.3.3-2" class="pilcrow">¶</a></p>
+<p id="section-11.3.3-3">With automatic commit the tail append can be large. The intermediary
+<span class="bcp14">MAY</span> forward all of it except a final part, as an append with
+Upload-Complete set to false, and hold only that final part as the tail
+it forwards later. The final part <span class="bcp14">SHOULD</span> be one append-alignment unit
+if an alignment applies. With explicit commit the tail append is empty
+and nothing needs to be split.<a href="#section-11.3.3-3" class="pilcrow">¶</a></p>
+<p id="section-11.3.3-4">An intermediary <span class="bcp14">MAY</span> set commit to "explicit" when tightening limits
+(<a href="#tightening" class="auto internal xref">Section 4.3</a>) so that the tail append is always empty.<a href="#section-11.3.3-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="hold-tail-retrieval">
+<section id="section-11.3.4">
+          <h4 id="name-offset-retrieval-while-hold">
+<a href="#section-11.3.4" class="section-number selfRef">11.3.4. </a><a href="#name-offset-retrieval-while-hold" class="section-name selfRef">Offset Retrieval While Holding</a>
+          </h4>
+<p id="section-11.3.4-1">While it holds the tail append, the intermediary <span class="bcp14">SHOULD</span> answer offset
+retrieval requests for the upload itself, or modify the server's
+response, so that the held range is reported as received and the
+Upload-Inspection field (<a href="#upload-inspection" class="auto internal xref">Section 11.3.6</a>) is included. Otherwise
+the client would see a gap at the end and re-send the tail, which is
+safe but wasteful.<a href="#section-11.3.4-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="verdicts">
+<section id="section-11.3.5">
+          <h4 id="name-verdicts">
+<a href="#section-11.3.5" class="section-number selfRef">11.3.5. </a><a href="#name-verdicts" class="section-name selfRef">Verdicts</a>
+          </h4>
+<span class="break"></span><dl class="dlNewline" id="section-11.3.5-1">
+            <dt id="section-11.3.5-1.1">Allowed:</dt>
+            <dd style="margin-left: 1.5em" id="section-11.3.5-1.2">
+              <p id="section-11.3.5-1.2.1">The intermediary forwards the tail append. It relays the server's
+final response to the client and adds Upload-Inspection with state
+"clean".<a href="#section-11.3.5-1.2.1" class="pilcrow">¶</a></p>
+</dd>
+            <dd class="break"></dd>
+<dt id="section-11.3.5-1.3">Blocked:</dt>
+            <dd style="margin-left: 1.5em" id="section-11.3.5-1.4">
+              <p id="section-11.3.5-1.4.1">The intermediary <span class="bcp14">MUST NOT</span> forward the tail append. It <span class="bcp14">SHOULD</span> cancel
+the upload at the server using upload cancellation as defined in
+<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>, and responds to the client with status 403 (Forbidden)
+and the problem type "upload-blocked". Later requests for the upload
+receive the same response.<a href="#section-11.3.5-1.4.1" class="pilcrow">¶</a></p>
+</dd>
+            <dd class="break"></dd>
+<dt id="section-11.3.5-1.5">Pending:</dt>
+            <dd style="margin-left: 1.5em" id="section-11.3.5-1.6">
+              <p id="section-11.3.5-1.6.1">If inspection takes longer than the intermediary is willing to hold
+the request, it <span class="bcp14">MAY</span> respond to the tail append with status 202
+(Accepted), a Retry-After field, and Upload-Inspection with state
+"scanning". The client then uses offset retrieval until the response
+shows the upload as complete or blocked.<a href="#section-11.3.5-1.6.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="upload-inspection">
+<section id="section-11.3.6">
+          <h4 id="name-the-upload-inspection-respo">
+<a href="#section-11.3.6" class="section-number selfRef">11.3.6. </a><a href="#name-the-upload-inspection-respo" class="section-name selfRef">The Upload-Inspection Response Field</a>
+          </h4>
+<p id="section-11.3.6-1">The Upload-Inspection response header field is a Dictionary
+<span>[<a href="#RFC9651" class="cite xref">RFC9651</a>]</span> that an inspecting intermediary uses to report progress:<a href="#section-11.3.6-1" class="pilcrow">¶</a></p>
+<div class="lang-http-message sourcecode" id="section-11.3.6-2">
+<pre>
+Upload-Inspection: state=scanning, scanned=7340032
+</pre><a href="#section-11.3.6-2" class="pilcrow">¶</a>
+</div>
+<span class="break"></span><dl class="dlParallel" id="section-11.3.6-3">
+            <dt id="section-11.3.6-3.1">state:</dt>
+            <dd style="margin-left: 1.5em" id="section-11.3.6-3.2">
+              <p id="section-11.3.6-3.2.1">A Token: "scanning", "clean", or "blocked".<a href="#section-11.3.6-3.2.1" class="pilcrow">¶</a></p>
+</dd>
+            <dd class="break"></dd>
+<dt id="section-11.3.6-3.3">scanned:</dt>
+            <dd style="margin-left: 1.5em" id="section-11.3.6-3.4">
+              <p id="section-11.3.6-3.4.1">An Integer, optional: the offset up to which content has been
+inspected.<a href="#section-11.3.6-3.4.1" class="pilcrow">¶</a></p>
+</dd>
+          <dd class="break"></dd>
+</dl>
+<p id="section-11.3.6-4">Only inspecting intermediaries set this field. A client <span class="bcp14">MUST NOT</span> treat
+it as a statement by the server, and <span class="bcp14">MAY</span> use it to explain delays to
+users. Unknown keys <span class="bcp14">MUST</span> be ignored.<a href="#section-11.3.6-4" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="verdict-cache">
+<section id="section-11.3.7">
+          <h4 id="name-reusing-earlier-verdicts">
+<a href="#section-11.3.7" class="section-number selfRef">11.3.7. </a><a href="#name-reusing-earlier-verdicts" class="section-name selfRef">Reusing Earlier Verdicts</a>
+          </h4>
+<p id="section-11.3.7-1">If the client sends Repr-Digest at upload creation, an inspecting
+intermediary <span class="bcp14">MAY</span> look up an earlier verdict for that digest under the
+same policy. A digest known to be blocked can be refused at upload
+creation, before any content is transferred. For a digest known to be
+allowed, the intermediary <span class="bcp14">MAY</span> skip its inspection engines, but <span class="bcp14">MUST</span>
+still compute the digest of the content as it passes and treat a
+mismatch as blocked.<a href="#section-11.3.7-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+</section>
+</div>
+<div id="versions">
+<section id="section-12">
+      <h2 id="name-http-version-considerations">
+<a href="#section-12" class="section-number selfRef">12. </a><a href="#name-http-version-considerations" class="section-name selfRef">HTTP Version Considerations</a>
+      </h2>
+<div id="h2h3">
+<section id="section-12.1">
+        <h3 id="name-http-2-and-http-3">
+<a href="#section-12.1" class="section-number selfRef">12.1. </a><a href="#name-http-2-and-http-3" class="section-name selfRef">HTTP/2 and HTTP/3</a>
+        </h3>
+<p id="section-12.1-1">Over HTTP/2 <span>[<a href="#RFC9113" class="cite xref">RFC9113</a>]</span> and HTTP/3 <span>[<a href="#RFC9114" class="cite xref">RFC9114</a>]</span>, each append is a
+request on its own stream, and several appends can share one
+connection. Because streams on one connection share one congestion
+controller, a client <span class="bcp14">MAY</span> also open additional connections, within
+max-parallel, when a single connection does not use the available
+capacity.<a href="#section-12.1-1" class="pilcrow">¶</a></p>
+<div id="h2h3-priority">
+<section id="section-12.1.1">
+          <h4 id="name-priorities">
+<a href="#section-12.1.1" class="section-number selfRef">12.1.1. </a><a href="#name-priorities" class="section-name selfRef">Priorities</a>
+          </h4>
+<p id="section-12.1.1-1">A client <span class="bcp14">SHOULD</span> use the Priority field <span>[<a href="#RFC9218" class="cite xref">RFC9218</a>]</span> to give the append
+that starts at the contiguous offset a lower urgency value (that is,
+higher importance) than appends further into the window, for example
+u=1 for the first and u=3 to u=5 for later ones. Servers and
+intermediaries <span class="bcp14">MAY</span> send PRIORITY_UPDATE frames to adjust this.
+Delivering the start of the window first lets the window slide sooner
+and reduces the data buffered out of order. Priorities are hints; the
+protocol works without them.<a href="#section-12.1.1-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="h2h3-flow">
+<section id="section-12.1.2">
+          <h4 id="name-flow-control">
+<a href="#section-12.1.2" class="section-number selfRef">12.1.2. </a><a href="#name-flow-control" class="section-name selfRef">Flow Control</a>
+          </h4>
+<p id="section-12.1.2-1">A request's header section, which carries Upload-Offset and
+Content-Length, arrives before its content. A recipient therefore knows
+the range of an append before any of its content arrives, and can use
+per-stream flow control to delay an append that is outside the window
+instead of rejecting it:<a href="#section-12.1.2-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-12.1.2-2.1">
+              <p id="section-12.1.2-2.1.1">For an append inside the window, the recipient grants flow control
+credit as usual (WINDOW_UPDATE in HTTP/2, MAX_STREAM_DATA <span>[<a href="#RFC9000" class="cite xref">RFC9000</a>]</span>
+in HTTP/3).<a href="#section-12.1.2-2.1.1" class="pilcrow">¶</a></p>
+</li>
+            <li class="normal" id="section-12.1.2-2.2">
+              <p id="section-12.1.2-2.2.1">For an append outside the window, the recipient withholds credit
+beyond the initial stream window until the window reaches the append.
+The sender pauses on that stream only.<a href="#section-12.1.2-2.2.1" class="pilcrow">¶</a></p>
+</li>
+            <li class="normal" id="section-12.1.2-2.3">
+              <p id="section-12.1.2-2.3.1">The recipient <span class="bcp14">MUST</span> continue to grant connection-level credit to other
+streams, so that a delayed stream does not stall them.<a href="#section-12.1.2-2.3.1" class="pilcrow">¶</a></p>
+</li>
+            <li class="normal" id="section-12.1.2-2.4">
+              <p id="section-12.1.2-2.4.1">A recipient <span class="bcp14">MAY</span> reject an append that has been delayed longer than it
+is willing to wait, as described in <a href="#server-window" class="auto internal xref">Section 10.2</a>.<a href="#section-12.1.2-2.4.1" class="pilcrow">¶</a></p>
+</li>
+          </ul>
+<p id="section-12.1.2-3">A delayed stream can still send up to its initial stream window before
+pausing. A recipient that delays appends can lower its initial stream
+window to bound that data.<a href="#section-12.1.2-3" class="pilcrow">¶</a></p>
+<span id="name-delaying-an-append-with-flo"></span><div id="fig-flow">
+<figure id="figure-3">
+            <div class="alignLeft art-ascii-art art-text artwork" id="section-12.1.2-4.1">
+<pre>
+Client                           Recipient
+  | HEADERS 1, Upload-Offset: 0       |  C = 0,
+  | HEADERS 3, Upload-Offset: 2097152 |  window [0, 6 MiB)
+  | HEADERS 5, Upload-Offset: 8388608 |
+  |----------------------------------&gt;|
+  |      WINDOW_UPDATE streams 1, 3   |  stream 5 is outside
+  |&lt;----------------------------------|  the window: no
+  | DATA streams 1, 3                 |  further credit
+  |----------------------------------&gt;|
+  |                                   |  C reaches 4 MiB,
+  |      WINDOW_UPDATE stream 5       |  window [4, 10 MiB)
+  |&lt;----------------------------------|
+  | DATA stream 5                     |
+  |----------------------------------&gt;|
+</pre>
+</div>
+<figcaption><a href="#figure-3" class="selfRef">Figure 3</a>:
+<a href="#name-delaying-an-append-with-flo" class="selfRef">Delaying an Append with Flow Control (W = 6 MiB)</a>
+            </figcaption></figure>
+</div>
+</section>
+</div>
+<div id="h2h3-other">
+<section id="section-12.1.3">
+          <h4 id="name-cancellation-and-early-data">
+<a href="#section-12.1.3" class="section-number selfRef">12.1.3. </a><a href="#name-cancellation-and-early-data" class="section-name selfRef">Cancellation and Early Data</a>
+          </h4>
+<p id="section-12.1.3-1">A client cancels a redundant or abandoned append with RST_STREAM in
+HTTP/2 or by resetting the stream in HTTP/3. The server treats it as an
+interrupted append (<a href="#interrupted" class="auto internal xref">Section 5.4</a>).<a href="#section-12.1.3-1" class="pilcrow">¶</a></p>
+<p id="section-12.1.3-2">Upload creation and appends <span class="bcp14">MUST NOT</span> be sent in TLS early data. A
+server that receives them in early data responds with status 425 (Too
+Early) <span>[<a href="#RFC8470" class="cite xref">RFC8470</a>]</span>.<a href="#section-12.1.3-2" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="http11">
+<section id="section-12.2">
+        <h3 id="name-http-11">
+<a href="#section-12.2" class="section-number selfRef">12.2. </a><a href="#name-http-11" class="section-name selfRef">HTTP/1.1</a>
+        </h3>
+<p id="section-12.2-1">Over HTTP/1.1 <span>[<a href="#RFC9112" class="cite xref">RFC9112</a>]</span>, parallel appends use separate connections,
+one append per connection at a time. The following rules apply:<a href="#section-12.2-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-12.2-2.1">
+            <p id="section-12.2-2.1.1">A client <span class="bcp14">MUST NOT</span> use more than max-parallel connections for appends
+to one upload. Browsers are additionally limited by their per-origin
+connection limits.<a href="#section-12.2-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.2-2.2">
+            <p id="section-12.2-2.2.1">HTTP/1.1 has no per-request flow control. A client <span class="bcp14">MUST NOT</span> start an
+append outside the window, and a recipient <span class="bcp14">SHOULD</span> reject such an
+append with 409 and "offset-outside-window" rather than delay it.<a href="#section-12.2-2.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.2-2.3">
+            <p id="section-12.2-2.3.1">HTTP/1.1 has no priorities. A client keeps the append at the
+contiguous offset in progress first and <span class="bcp14">MAY</span> send it again on a second
+connection if it stalls (<a href="#client-reqs" class="auto internal xref">Section 9</a>).<a href="#section-12.2-2.3.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.2-2.4">
+            <p id="section-12.2-2.4.1">Some intermediaries do not forward informational responses. A client
+<span class="bcp14">MUST NOT</span> depend on receiving 104 (Upload Resumption Supported) and
+<span class="bcp14">SHOULD</span> create the upload with an empty body, taking the upload
+resource and limits from the final response.<a href="#section-12.2-2.4.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.2-2.5">
+            <p id="section-12.2-2.5.1">A client <span class="bcp14">MUST NOT</span> pipeline requests.<a href="#section-12.2-2.5.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.2-2.6">
+            <p id="section-12.2-2.6.1">Appends in parallel mode carry Content-Length (<a href="#append-requests" class="auto internal xref">Section 5.2</a>)
+and therefore do not use chunked transfer coding.<a href="#section-12.2-2.6.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.2-2.7">
+            <p id="section-12.2-2.7.1">A client <span class="bcp14">MAY</span> send Expect: 100-continue, and <span class="bcp14">MUST</span> continue if no 100
+(Continue) response arrives, as described in <span>[<a href="#RFC9110" class="cite xref">RFC9110</a>]</span>.<a href="#section-12.2-2.7.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-12.2-3">If max-parallel is absent or 1, client and server use the sequential
+behavior of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> unchanged.<a href="#section-12.2-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="problems">
+<section id="section-13">
+      <h2 id="name-problem-types">
+<a href="#section-13" class="section-number selfRef">13. </a><a href="#name-problem-types" class="section-name selfRef">Problem Types</a>
+      </h2>
+<p id="section-13-1">Error responses defined in this document use Problem Details
+<span>[<a href="#RFC9457" class="cite xref">RFC9457</a>]</span> with the following problem types. Each type URI has the
+form https://iana.org/assignments/http-problem-types#NAME.<a href="#section-13-1" class="pilcrow">¶</a></p>
+<span id="name-problem-types-2"></span><div id="tab-problems">
+<table class="center" id="table-2">
+        <caption>
+<a href="#table-2" class="selfRef">Table 2</a>:
+<a href="#name-problem-types-2" class="selfRef">Problem Types</a>
+        </caption>
+<thead>
+          <tr>
+            <th class="text-left" rowspan="1" colspan="1">Name</th>
+            <th class="text-left" rowspan="1" colspan="1">Status</th>
+            <th class="text-left" rowspan="1" colspan="1">Meaning</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">offset-outside-window</td>
+            <td class="text-left" rowspan="1" colspan="1">409</td>
+            <td class="text-left" rowspan="1" colspan="1">The append ends beyond the reorder window. The response includes Upload-Offset.</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">range-conflict</td>
+            <td class="text-left" rowspan="1" colspan="1">409</td>
+            <td class="text-left" rowspan="1" colspan="1">The append overlaps received bytes with different content.</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">incomplete-ranges</td>
+            <td class="text-left" rowspan="1" colspan="1">409</td>
+            <td class="text-left" rowspan="1" colspan="1">An explicit commit was sent while gaps remain. The response includes Upload-Received.</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">misaligned-append</td>
+            <td class="text-left" rowspan="1" colspan="1">400</td>
+            <td class="text-left" rowspan="1" colspan="1">The offset or length violates append-alignment.</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">too-many-parallel</td>
+            <td class="text-left" rowspan="1" colspan="1">429</td>
+            <td class="text-left" rowspan="1" colspan="1">More than max-parallel appends are in progress.</td>
+          </tr>
+          <tr>
+            <td class="text-left" rowspan="1" colspan="1">upload-blocked</td>
+            <td class="text-left" rowspan="1" colspan="1">403</td>
+            <td class="text-left" rowspan="1" colspan="1">An inspecting intermediary blocked the upload by policy.</td>
+          </tr>
+        </tbody>
+      </table>
+</div>
+<p id="section-13-3">Problem details for "upload-blocked" <span class="bcp14">MUST NOT</span> identify the inspection
+engine, signature, or policy rule that matched.<a href="#section-13-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="security-considerations">
+<section id="section-14">
+      <h2 id="name-security-considerations">
+<a href="#section-14" class="section-number selfRef">14. </a><a href="#name-security-considerations" class="section-name selfRef">Security Considerations</a>
+      </h2>
+<p id="section-14-1">The security considerations of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> apply to this extension as
+well.<a href="#section-14-1" class="pilcrow">¶</a></p>
+<p id="section-14-2">A client cannot get more parallelism than every party on the path
+allows, because intermediaries can only tighten the limits
+(<a href="#tightening" class="auto internal xref">Section 4.3</a>). An inspecting intermediary controls whether an upload
+is committed by holding its tail append (<a href="#hold-tail" class="auto internal xref">Section 11.3.3</a>), so content
+cannot be committed without passing through any inspection on the
+path.<a href="#section-14-2" class="pilcrow">¶</a></p>
+<p id="section-14-3">An attacker may try to split content across appends so that no single
+append matches an inspection policy. Processing appends in order,
+across append boundaries (<a href="#in-order" class="auto internal xref">Section 11.3.1</a>), handles this. Evaluating each
+append on its own does not.<a href="#section-14-3" class="pilcrow">¶</a></p>
+<p id="section-14-4">A digest sent by the client is only a claim. Servers and intermediaries
+can use it to detect errors or to look up earlier verdicts, but have to
+verify it against the actual content before relying on it
+(<a href="#verdict-cache" class="auto internal xref">Section 11.3.7</a>).<a href="#section-14-4" class="pilcrow">¶</a></p>
+<p id="section-14-5">The reorder window bounds how much out-of-order data is buffered per
+upload, but an attacker can still open many uploads. Servers and
+intermediaries need to limit the number of uploads per client, the
+total amount of buffered data, and how long they hold delayed appends.
+They can respond with 429 (Too Many Requests) when overloaded.<a href="#section-14-5" class="pilcrow">¶</a></p>
+<p id="section-14-6">Incomplete uploads contain gaps and possibly uninspected data. They are
+never exposed as the representation of a resource (<a href="#server-storage" class="auto internal xref">Section 10.3</a>),
+and gaps are never filled with bytes that could reveal other stored
+data.<a href="#section-14-6" class="pilcrow">¶</a></p>
+<p id="section-14-7">Detailed inspection results would help an attacker adjust content until
+it passes. For that reason Upload-Inspection and "upload-blocked"
+responses carry only coarse information (<a href="#problems" class="auto internal xref">Section 13</a>).<a href="#section-14-7" class="pilcrow">¶</a></p>
+<p id="section-14-8">Parallel mode sends the upload resource URI over more connections. As
+in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>, the URI needs to be hard to guess, and access to it
+needs to be tied to the client's authorization.<a href="#section-14-8" class="pilcrow">¶</a></p>
+<p id="section-14-9">Appends are not sent in TLS early data (<a href="#h2h3-other" class="auto internal xref">Section 12.1.3</a>), and repeating
+an append with the same content has no effect, so replay does not cause
+harm.<a href="#section-14-9" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="iana-considerations">
+<section id="section-15">
+      <h2 id="name-iana-considerations">
+<a href="#section-15" class="section-number selfRef">15. </a><a href="#name-iana-considerations" class="section-name selfRef">IANA Considerations</a>
+      </h2>
+<div id="http-field-names">
+<section id="section-15.1">
+        <h3 id="name-http-field-names">
+<a href="#section-15.1" class="section-number selfRef">15.1. </a><a href="#name-http-field-names" class="section-name selfRef">HTTP Field Names</a>
+        </h3>
+<p id="section-15.1-1">IANA is asked to register the following fields in the "Hypertext
+Transfer Protocol (HTTP) Field Name Registry" established by
+<span>[<a href="#RFC9110" class="cite xref">RFC9110</a>]</span>:<a href="#section-15.1-1" class="pilcrow">¶</a></p>
+<span id="name-field-registrations"></span><div id="tab-iana-fields">
+<table class="center" id="table-3">
+          <caption>
+<a href="#table-3" class="selfRef">Table 3</a>:
+<a href="#name-field-registrations" class="selfRef">Field Registrations</a>
+          </caption>
+<thead>
+            <tr>
+              <th class="text-left" rowspan="1" colspan="1">Field Name</th>
+              <th class="text-left" rowspan="1" colspan="1">Status</th>
+              <th class="text-left" rowspan="1" colspan="1">Structured Type</th>
+              <th class="text-left" rowspan="1" colspan="1">Reference</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="text-left" rowspan="1" colspan="1">Upload-Parallel</td>
+              <td class="text-left" rowspan="1" colspan="1">permanent</td>
+              <td class="text-left" rowspan="1" colspan="1">Item</td>
+              <td class="text-left" rowspan="1" colspan="1">
+                <a href="#upload-parallel" class="auto internal xref">Section 4.1</a> of this document</td>
+            </tr>
+            <tr>
+              <td class="text-left" rowspan="1" colspan="1">Upload-Received</td>
+              <td class="text-left" rowspan="1" colspan="1">permanent</td>
+              <td class="text-left" rowspan="1" colspan="1">List</td>
+              <td class="text-left" rowspan="1" colspan="1">
+                <a href="#upload-received" class="auto internal xref">Section 6</a> of this document</td>
+            </tr>
+            <tr>
+              <td class="text-left" rowspan="1" colspan="1">Upload-Inspection</td>
+              <td class="text-left" rowspan="1" colspan="1">permanent</td>
+              <td class="text-left" rowspan="1" colspan="1">Dictionary</td>
+              <td class="text-left" rowspan="1" colspan="1">
+                <a href="#upload-inspection" class="auto internal xref">Section 11.3.6</a> of this document</td>
+            </tr>
+          </tbody>
+        </table>
+</div>
+</section>
+</div>
+<div id="upload-limit-parameters">
+<section id="section-15.2">
+        <h3 id="name-upload-limit-parameters-2">
+<a href="#section-15.2" class="section-number selfRef">15.2. </a><a href="#name-upload-limit-parameters-2" class="section-name selfRef">Upload-Limit Parameters</a>
+        </h3>
+<p id="section-15.2-1">If <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> establishes a registry of Upload-Limit parameters, IANA
+is asked to register max-parallel, reorder-window, append-alignment,
+and commit, with a reference to <a href="#limits" class="auto internal xref">Section 4.2</a> of this document.<a href="#section-15.2-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="http-problem-types">
+<section id="section-15.3">
+        <h3 id="name-http-problem-types">
+<a href="#section-15.3" class="section-number selfRef">15.3. </a><a href="#name-http-problem-types" class="section-name selfRef">HTTP Problem Types</a>
+        </h3>
+<p id="section-15.3-1">IANA is asked to register the problem types listed in <a href="#tab-problems" class="auto internal xref">Table 2</a>
+in the "HTTP Problem Types" registry established by <span>[<a href="#RFC9457" class="cite xref">RFC9457</a>]</span>, each
+with a reference to <a href="#problems" class="auto internal xref">Section 13</a> of this document.<a href="#section-15.3-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+</section>
+</div>
+<div id="sec-combined-references">
+<section id="section-16">
+      <h2 id="name-references">
+<a href="#section-16" class="section-number selfRef">16. </a><a href="#name-references" class="section-name selfRef">References</a>
+      </h2>
+<div id="sec-normative-references">
+<section id="section-16.1">
+        <h3 id="name-normative-references">
+<a href="#section-16.1" class="section-number selfRef">16.1. </a><a href="#name-normative-references" class="section-name selfRef">Normative References</a>
+        </h3>
+<dl class="references">
+<dt id="RESUMABLE">[RESUMABLE]</dt>
+        <dd>
+<span class="refAuthor">Kleidl, M.</span>, <span class="refAuthor">Zhang, G.</span>, and <span class="refAuthor">L. Pardue</span>, <span class="refTitle">"Resumable Uploads for HTTP"</span>, <span class="refContent">Work in Progress</span>, <span class="seriesInfo">Internet-Draft, draft-ietf-httpbis-resumable-upload-12</span>, <time datetime="2026-07-06" class="refDate">6 July 2026</time>, <span>&lt;<a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-resumable-upload-12">https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-resumable-upload-12</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC2119">[RFC2119]</dt>
+        <dd>
+<span class="refAuthor">Bradner, S.</span>, <span class="refTitle">"Key words for use in RFCs to Indicate Requirement Levels"</span>, <span class="seriesInfo">BCP 14</span>, <span class="seriesInfo">RFC 2119</span>, <span class="seriesInfo">DOI 10.17487/RFC2119</span>, <time datetime="1997-03" class="refDate">March 1997</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc2119">https://www.rfc-editor.org/rfc/rfc2119</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC8174">[RFC8174]</dt>
+        <dd>
+<span class="refAuthor">Leiba, B.</span>, <span class="refTitle">"Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words"</span>, <span class="seriesInfo">BCP 14</span>, <span class="seriesInfo">RFC 8174</span>, <span class="seriesInfo">DOI 10.17487/RFC8174</span>, <time datetime="2017-05" class="refDate">May 2017</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8174">https://www.rfc-editor.org/rfc/rfc8174</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9000">[RFC9000]</dt>
+        <dd>
+<span class="refAuthor">Iyengar, J., Ed.</span> and <span class="refAuthor">M. Thomson, Ed.</span>, <span class="refTitle">"QUIC: A UDP-Based Multiplexed and Secure Transport"</span>, <span class="seriesInfo">RFC 9000</span>, <span class="seriesInfo">DOI 10.17487/RFC9000</span>, <time datetime="2021-05" class="refDate">May 2021</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9000">https://www.rfc-editor.org/rfc/rfc9000</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9110">[RFC9110]</dt>
+        <dd>
+<span class="refAuthor">Fielding, R., Ed.</span>, <span class="refAuthor">Nottingham, M., Ed.</span>, and <span class="refAuthor">J. Reschke, Ed.</span>, <span class="refTitle">"HTTP Semantics"</span>, <span class="seriesInfo">STD 97</span>, <span class="seriesInfo">RFC 9110</span>, <span class="seriesInfo">DOI 10.17487/RFC9110</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9110">https://www.rfc-editor.org/rfc/rfc9110</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9112">[RFC9112]</dt>
+        <dd>
+<span class="refAuthor">Fielding, R., Ed.</span>, <span class="refAuthor">Nottingham, M., Ed.</span>, and <span class="refAuthor">J. Reschke, Ed.</span>, <span class="refTitle">"HTTP/1.1"</span>, <span class="seriesInfo">STD 99</span>, <span class="seriesInfo">RFC 9112</span>, <span class="seriesInfo">DOI 10.17487/RFC9112</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9112">https://www.rfc-editor.org/rfc/rfc9112</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9113">[RFC9113]</dt>
+        <dd>
+<span class="refAuthor">Thomson, M., Ed.</span> and <span class="refAuthor">C. Benfield, Ed.</span>, <span class="refTitle">"HTTP/2"</span>, <span class="seriesInfo">RFC 9113</span>, <span class="seriesInfo">DOI 10.17487/RFC9113</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9113">https://www.rfc-editor.org/rfc/rfc9113</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9114">[RFC9114]</dt>
+        <dd>
+<span class="refAuthor">Bishop, M., Ed.</span>, <span class="refTitle">"HTTP/3"</span>, <span class="seriesInfo">RFC 9114</span>, <span class="seriesInfo">DOI 10.17487/RFC9114</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9114">https://www.rfc-editor.org/rfc/rfc9114</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9457">[RFC9457]</dt>
+        <dd>
+<span class="refAuthor">Nottingham, M.</span>, <span class="refAuthor">Wilde, E.</span>, and <span class="refAuthor">S. Dalal</span>, <span class="refTitle">"Problem Details for HTTP APIs"</span>, <span class="seriesInfo">RFC 9457</span>, <span class="seriesInfo">DOI 10.17487/RFC9457</span>, <time datetime="2023-07" class="refDate">July 2023</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9457">https://www.rfc-editor.org/rfc/rfc9457</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9530">[RFC9530]</dt>
+        <dd>
+<span class="refAuthor">Polli, R.</span> and <span class="refAuthor">L. Pardue</span>, <span class="refTitle">"Digest Fields"</span>, <span class="seriesInfo">RFC 9530</span>, <span class="seriesInfo">DOI 10.17487/RFC9530</span>, <time datetime="2024-02" class="refDate">February 2024</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9530">https://www.rfc-editor.org/rfc/rfc9530</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9651">[RFC9651]</dt>
+      <dd>
+<span class="refAuthor">Nottingham, M.</span> and <span class="refAuthor">P. Kamp</span>, <span class="refTitle">"Structured Field Values for HTTP"</span>, <span class="seriesInfo">RFC 9651</span>, <span class="seriesInfo">DOI 10.17487/RFC9651</span>, <time datetime="2024-09" class="refDate">September 2024</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9651">https://www.rfc-editor.org/rfc/rfc9651</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+</dl>
+</section>
+</div>
+<div id="sec-informative-references">
+<section id="section-16.2">
+        <h3 id="name-informative-references">
+<a href="#section-16.2" class="section-number selfRef">16.2. </a><a href="#name-informative-references" class="section-name selfRef">Informative References</a>
+        </h3>
+<dl class="references">
+<dt id="BYTERANGE">[BYTERANGE]</dt>
+        <dd>
+<span class="refAuthor">Wright, A.</span>, <span class="refTitle">"Byte Range PATCH"</span>, <span class="refContent">Work in Progress</span>, <span class="seriesInfo">Internet-Draft, draft-ietf-httpapi-patch-byterange-04</span>, <time datetime="2026-07-06" class="refDate">6 July 2026</time>, <span>&lt;<a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-patch-byterange-04">https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-patch-byterange-04</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC8470">[RFC8470]</dt>
+        <dd>
+<span class="refAuthor">Thomson, M.</span>, <span class="refAuthor">Nottingham, M.</span>, and <span class="refAuthor">W. Tarreau</span>, <span class="refTitle">"Using Early Data in HTTP"</span>, <span class="seriesInfo">RFC 8470</span>, <span class="seriesInfo">DOI 10.17487/RFC8470</span>, <time datetime="2018-09" class="refDate">September 2018</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8470">https://www.rfc-editor.org/rfc/rfc8470</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9218">[RFC9218]</dt>
+        <dd>
+<span class="refAuthor">Oku, K.</span> and <span class="refAuthor">L. Pardue</span>, <span class="refTitle">"Extensible Prioritization Scheme for HTTP"</span>, <span class="seriesInfo">RFC 9218</span>, <span class="seriesInfo">DOI 10.17487/RFC9218</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9218">https://www.rfc-editor.org/rfc/rfc9218</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="TUS">[TUS]</dt>
+      <dd>
+<span class="refAuthor">tus project</span>, <span class="refTitle">"tus resumable upload protocol, version 1.0.0"</span>, <time datetime="2016-03-25" class="refDate">25 March 2016</time>, <span>&lt;<a href="https://tus.io/protocols/resumable-upload">https://tus.io/protocols/resumable-upload</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+</dl>
+</section>
+</div>
+</section>
+</div>
+<div id="acknowledgments">
+<section id="appendix-A">
+      <h2 id="name-acknowledgments">
+<a href="#name-acknowledgments" class="section-name selfRef">Acknowledgments</a>
+      </h2>
+<p id="appendix-A-1">This document builds on the work of the authors of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> and
+<span>[<a href="#BYTERANGE" class="cite xref">BYTERANGE</a>]</span>, and on the tus protocol <span>[<a href="#TUS" class="cite xref">TUS</a>]</span>.<a href="#appendix-A-1" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="authors-addresses">
+<section id="appendix-B">
+      <h2 id="name-authors-address">
+<a href="#name-authors-address" class="section-name selfRef">Author's Address</a>
+      </h2>
+<address class="vcard">
+        <div dir="auto" class="left"><span class="fn nameRole">Santosh Pallagatti</span></div>
+<div dir="auto" class="left"><span class="org">Zscaler</span></div>
+<div class="email">
+<span>Email:</span>
+<a href="mailto:santosh.pallagatti@gmail.com" class="email">santosh.pallagatti@gmail.com</a>
+</div>
+</address>
+</section>
+</div>
+<script>const toc = document.getElementById("toc");
+toc.querySelector("h2").addEventListener("click", e => {
+  toc.classList.toggle("active");
+});
+toc.querySelector("nav").addEventListener("click", e => {
+  toc.classList.remove("active");
+});
+</script>
+</body>
+</html>
