@@ -1,3 +1,4 @@
+---
 title: "Parallel Appends for Resumable Uploads" abbrev: "Parallel Resumable Uploads" category: std
 
 docname: draft-spk-httpbis-parallel-upload-latest submissiontype: IETF number: date: consensus: true v: 3 area: "Web and Internet Transport" workgroup: "HTTP" keyword:
