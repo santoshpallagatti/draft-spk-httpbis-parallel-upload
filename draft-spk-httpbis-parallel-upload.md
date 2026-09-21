@@ -1,20 +1,5 @@
 ---
-title: "Parallel Appends for Resumable Uploads" abbrev: "Parallel Resumable Uploads" category: std
-
-docname: draft-spk-httpbis-parallel-upload-latest submissiontype: IETF number: date: consensus: true v: 3 area: "Web and Internet Transport" workgroup: "HTTP" keyword:
-
-resumable upload
-parallel upload
-intermediary
-content inspection venue: group: "HTTP" type: "Working Group" mail: "ietf-http-wg@w3.org" arch: "https://lists.w3.org/Archives/Public/ietf-http-wg/" github: "santoshpallagatti/draft-spk-httpbis-parallel-upload" latest: "https://santoshpallagatti.github.io/draft-spk-httpbis-parallel-upload/draft-spk-httpbis-parallel-upload.html"
-author:
-fullname: Santosh Pallagatti
-organization: "Zscaler"
-email: "santosh.pallagatti@gmail.com"
-
-normative: RESUMABLE: I-D.ietf-httpbis-resumable-upload RFC9000: RFC9110: RFC9112: RFC9113: RFC9114: RFC9457: RFC9530: RFC9651:
-
-informative: BYTERANGE: I-D.ietf-httpapi-patch-byterange RFC8470: RFC9218: TUS: title: "tus resumable upload protocol, version 1.0.0" target: https://tus.io/protocols/resumable-upload author: - org: tus project date: 2016-03-25
+title: "Parallel Appends for Resumable Uploads" abbrev: "Parallel Resumable Uploads" category: std docname: draft-spk-httpbis-parallel-upload-latest submissiontype: IETF number: date: consensus: true v: 3 area: "Web and Internet Transport" workgroup: "HTTP" keyword: ["resumable upload", "parallel upload", "intermediary", "content inspection"] venue: {group: "HTTP", type: "Working Group", mail: "ietf-http-wg@w3.org", arch: "https://lists.w3.org/Archives/Public/ietf-http-wg/", github: "santoshpallagatti/draft-spk-httpbis-parallel-upload", latest: "https://santoshpallagatti.github.io/draft-spk-httpbis-parallel-upload/draft-spk-httpbis-parallel-upload.html"} author: [{fullname: "Santosh Pallagatti", organization: "Zscaler", email: "santosh.pallagatti@gmail.com"}] normative: {RESUMABLE: I-D.ietf-httpbis-resumable-upload, RFC9000:, RFC9110:, RFC9112:, RFC9113:, RFC9114:, RFC9457:, RFC9530:, RFC9651:} informative: {BYTERANGE: I-D.ietf-httpapi-patch-byterange, RFC8470:, RFC9218:, TUS: {title: "tus resumable upload protocol, version 1.0.0", target: "https://tus.io/protocols/resumable-upload", author: [{org: "tus project"}], date: 2016-03-25}}
 
 --- abstract
 
