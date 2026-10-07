@@ -3,9 +3,9 @@
 
 
 HTTP                                                       S. Pallagatti
-Internet-Draft                                                   Zscaler
-Intended status: Standards Track                       21 September 2026
-Expires: 25 March 2027
+Internet-Draft                                             A. Maheshwari
+Intended status: Standards Track                                 Zscaler
+Expires: 10 April 2027                                    7 October 2026
 
 
                  Parallel Appends for Resumable Uploads
@@ -56,7 +56,7 @@ Status of This Memo
    time.  It is inappropriate to use Internet-Drafts as reference
    material or to cite them other than as "work in progress."
 
-   This Internet-Draft will expire on 25 March 2027.
+   This Internet-Draft will expire on 10 April 2027.
 
 Copyright Notice
 
@@ -99,6 +99,7 @@ Table of Contents
      10.2.  Enforcing Limits
      10.3.  Storage and Visibility
      10.4.  Resource Management
+     10.5.  Expiry, Failure, and Loss of State
    11. Intermediary Requirements
      11.1.  All Intermediaries
      11.2.  Terminating Parallel Mode at an Intermediary
@@ -109,7 +110,8 @@ Table of Contents
        11.3.4.  Offset Retrieval While Holding
        11.3.5.  Verdicts
        11.3.6.  The Upload-Inspection Response Field
-       11.3.7.  Reusing Earlier Verdicts
+       11.3.7.  Timeouts and Failures
+       11.3.8.  Reusing Earlier Verdicts
    12. HTTP Version Considerations
      12.1.  HTTP/2 and HTTP/3
        12.1.1.  Priorities
@@ -126,7 +128,7 @@ Table of Contents
      16.1.  Normative References
      16.2.  Informative References
    Acknowledgments
-   Author's Address
+   Authors' Addresses
 
 1.  Introduction
 
@@ -145,12 +147,21 @@ Table of Contents
    also add an idle round trip between appends, and one slow append
    delays everything after it.
 
-   Parallel uploads are widely deployed, but only in service-specific
-   forms.  Cloud storage APIs, and the Concatenation extension of the
-   tus protocol [TUS], upload parts as separate resources and join them
-   at the end.  There is no standard way to send parts of a single
-   upload resource in parallel.  The Byte Range PATCH draft [BYTERANGE]
-   mentions parallel uploads and leaves them for "a later document".
+   HTTP has had a standard mechanism for parallel downloads since
+   HTTP/1.1: a client requests different byte ranges of the same
+   resource at the same time using the Range header field (Section 14.2
+   of [RFC9110]), and download managers and cloud storage clients rely
+   on it.  Uploads have no counterpart.  Section 14.5 of [RFC9110]
+   describes Content-Range in a PUT request but leaves its handling
+   undefined, and [RESUMABLE] requires appends to be sequential.
+
+   Parallel uploads are nevertheless widely deployed in service-specific
+   forms: cloud storage APIs, and the Concatenation extension of the tus
+   protocol [TUS], upload parts as separate resources and join them at
+   the end.  What is missing is a standard way for a client to send
+   several byte ranges of one upload at the same time.  The Byte Range
+   PATCH draft [BYTERANGE] mentions parallel uploads and leaves them for
+   "a later document".
 
    This document defines such an extension for [RESUMABLE].  A client
    asks for parallel mode when it creates the upload (Section 4) and
@@ -299,10 +310,29 @@ Table of Contents
    server that receives Upload-Parallel without Upload-Length MUST treat
    the upload as sequential.
 
-   A client MAY create the upload with an empty body (Upload-Complete
-   set to false and no content) so that it learns the upload resource
-   and the limits before it sends any data.  This is RECOMMENDED when
-   HTTP/1.1 is used (Section 12.2).
+   A client MAY create the upload with an empty body: a POST carrying
+   Upload-Parallel, Upload-Length, Upload-Complete set to false, and no
+   content.  The response gives the client the Location of the upload
+   resource and the Upload-Limit field, so it knows the upload URI and
+   the limits that apply, that is how many appends may be in flight, the
+   reorder window, any alignment, and the commit mode, before it sends
+   any content.  All content is then sent in appends.
+
+   POST /files HTTP/1.1
+   Host: example.com
+   Upload-Parallel: ?1
+   Upload-Length: 12582912
+   Upload-Complete: ?0
+   Content-Length: 0
+
+   HTTP/1.1 201 Created
+   Location: /uploads/abc
+   Upload-Limit: max-parallel=3, reorder-window=6291456
+
+   This is RECOMMENDED when HTTP/1.1 is used, because [RESUMABLE]
+   otherwise carries the upload URI in a 104 (Upload Resumption
+   Supported) interim response, which some intermediaries do not forward
+   (Section 12.2).
 
 4.2.  Upload-Limit Parameters
 
@@ -311,8 +341,11 @@ Table of Contents
 
    max-parallel:
       An Integer.  The maximum number of appends to this upload that may
-      be in progress at the same time.  A value of 1, or the absence of
-      the parameter, means the upload is sequential.
+      be in progress at the same time.  A value of 1 means the upload is
+      sequential.  If the parameter is absent, this field places no
+      limit on the number of appends; concurrency is then bounded only
+      by the reorder window and by what the server accepts at the time
+      (Section 10.2).
 
    reorder-window:
       An Integer.  The reorder window W in bytes.  If absent while max-
@@ -328,9 +361,13 @@ Table of Contents
       A Token, either "auto" or "explicit".  See Section 7.  If absent,
       the value is "auto".
 
-   A server that accepts parallel mode MUST include max-parallel with a
-   value greater than 1 in the Upload-Limit field of the upload creation
-   response and of every offset retrieval response.
+   A server that accepts parallel mode MUST include at least one of max-
+   parallel with a value greater than 1, or reorder-window, in the
+   Upload-Limit field of the upload creation response and of every
+   offset retrieval response.  A server that cares only about how much
+   out-of-order data it has to hold can send reorder-window alone; one
+   that cares only about the number of concurrent requests can send max-
+   parallel alone.
 
 4.3.  Tightening by Intermediaries
 
@@ -351,14 +388,32 @@ Table of Contents
    Because each hop can only tighten the limits, the values a client
    receives are the strictest on the path.
 
+   Only the party that has to satisfy a limit can raise it.  Replacing
+   append-alignment with a multiple of its current value is a further
+   restriction on the client, not a new permission, which is why an
+   intermediary may do it.  Raising max-parallel or reorder-window would
+   commit the server to work it has not agreed to, so an intermediary
+   cannot do that even though it could reassemble the data itself.  An
+   intermediary that takes over parallel mode on the client-facing hop
+   (Section 11.2) is a different case: there it acts as the server, and
+   it MAY advertise its own limits, including larger ones, because it
+   services them itself.
+
 4.4.  Falling Back to Sequential Uploads
 
    The upload is in parallel mode only if the client sent Upload-
    Parallel with the value true and the response to upload creation
-   contains max-parallel greater than 1.  Otherwise, client and server
-   MUST follow [RESUMABLE] without the changes in this document.  Limits
-   can also tighten later: a client MUST apply the values from the most
-   recent offset retrieval or append response.
+   contains either max-parallel greater than 1 or reorder-window.
+   Otherwise, client and server MUST follow [RESUMABLE] without the
+   changes in this document.  A value of 1 for max-parallel always means
+   sequential.
+
+   Limits can change during an upload.  Any response for the upload
+   resource, whether to upload creation, to an append, or to offset
+   retrieval, MAY carry a different Upload-Limit, and a client MUST
+   apply the most recent values to appends it starts after receiving
+   them.  Appends already in progress are not invalidated by a change
+   (Section 10.2).
 
 5.  Parallel Appends
 
@@ -394,10 +449,10 @@ Table of Contents
    append in parallel mode, so that a recipient knows the full range
    before the content arrives.
 
-   A client MUST NOT have more than max-parallel appends to the same
-   upload in progress at once.  An append is in progress from when its
-   request starts until its response is received or the request is
-   abandoned.
+   If max-parallel is present, a client MUST NOT have more than that
+   many appends to the same upload in progress at once.  An append is in
+   progress from when its request starts until its response is received
+   or the request is abandoned.
 
    A client SHOULD include a Content-Digest field [RFC9530] on each
    append so that the server and intermediaries can verify each range on
@@ -423,6 +478,11 @@ Table of Contents
    server detects that overlapping bytes differ from the stored bytes
    (using Content-Digest, say), it MUST reject the append with status
    409 (Conflict) and the problem type "range-conflict" (Section 13).
+
+   Two appends in flight for the same range with identical content are
+   not a conflict.  The server treats the newer one as a retry of the
+   older (see below), and the range is stored once.  The problem type
+   "range-conflict" applies only when overlapping bytes differ.
 
    If a new append overlaps a range that is being written by an append
    still in progress, the server SHOULD terminate the older append
@@ -564,6 +624,10 @@ Table of Contents
    *  A client SHOULD send Repr-Digest [RFC9530] for the whole
       representation, either at upload creation or on the tail append.
 
+   *  If a request for the upload resource fails with 404 (Not Found) or
+      410 (Gone), the upload no longer exists (Section 10.5) and a
+      client MUST create a new one rather than continue sending ranges.
+
 10.  Server Requirements
 
 10.1.  Upload State
@@ -621,6 +685,22 @@ Table of Contents
    buffer per upload.  A server that buffers in memory SHOULD choose
    reorder-window and max-parallel according to its memory budget, and
    SHOULD also limit the number of concurrent uploads per client.
+
+10.5.  Expiry, Failure, and Loss of State
+
+   Uploads expire as described in [RESUMABLE], and a server SHOULD state
+   its expiry through the max-age parameter of Upload-Limit so that
+   clients and intermediaries can bound how long they keep state for an
+   upload.  An upload that expires or is cancelled MUST be discarded
+   without being committed (Section 10.3).
+
+   Upload-Offset never decreases, and Upload-Received lists only ranges
+   the server holds.  A server that loses recorded ranges, for example
+   when an instance without shared state restarts, therefore MUST NOT
+   report a smaller contiguous offset or fewer ranges for that upload.
+   It MUST instead fail subsequent requests for the upload resource with
+   404 (Not Found) or 410 (Gone), so that the client creates a new
+   upload rather than completing one with missing bytes.
 
 11.  Intermediary Requirements
 
@@ -699,6 +779,12 @@ Table of Contents
    throughput is unaffected; the only added delay is the time needed to
    inspect the last data received.
 
+   The simplest way to do this is to set commit to "explicit" when
+   tightening limits (Section 4.3).  Every append then reaches the
+   server unchanged, and the only request the intermediary holds is the
+   empty commit request at the end, which it forwards once its verdict
+   allows the content.
+
    An intermediary that does not want the server to store uninspected
    bytes at all can instead forward each range only after inspecting it,
    at the cost of more delay.  It can also forward the upload
@@ -715,7 +801,10 @@ Table of Contents
 
    The intermediary always knows which append is the tail: it carries
    Upload-Complete set to true and, with automatic commit, ends at the
-   upload length.
+   upload length.  With explicit commit the tail append is the empty
+   commit request, so holding it delays nothing but the commit itself.
+   That is the same rule as the strategy in Section 11.3.2, not an
+   alternative to it.
 
    With automatic commit the tail append can be large.  The intermediary
    MAY forward all of it except a final part, as an append with Upload-
@@ -773,7 +862,32 @@ Table of Contents
    treat it as a statement by the server, and MAY use it to explain
    delays to users.  Unknown keys MUST be ignored.
 
-11.3.7.  Reusing Earlier Verdicts
+11.3.7.  Timeouts and Failures
+
+   An intermediary SHOULD bound how long it holds a tail append.  If it
+   cannot reach a verdict, because an inspection engine is unavailable
+   or the upstream server is failing, it MUST NOT forward the tail.  It
+   SHOULD cancel the upload at the server and fail the client's request,
+   so that content that was never inspected is not left stored and
+   cannot be committed later.
+
+   An intermediary that abandons an upload, for example when the client
+   disconnects or the intermediary itself restarts, SHOULD cancel the
+   upload at the server rather than rely on expiry.
+
+   An intermediary that has lost its buffered or inspection state for an
+   upload MUST NOT continue to answer offset retrieval on the server's
+   behalf (Section 11.3.4); it forwards those requests, so the client
+   learns the state the server actually has and re-sends whatever is
+   missing.  It MUST NOT treat any part of the upload as already
+   inspected unless it kept the inspection state, and otherwise inspects
+   again from the contiguous offset or blocks the upload.
+
+   If forwarding a held tail append fails because the upload has expired
+   or the server has lost it, the intermediary reports the failure to
+   the client and discards the held content.
+
+11.3.8.  Reusing Earlier Verdicts
 
    If the client sends Repr-Digest at upload creation, an inspecting
    intermediary MAY look up an earlier verdict for that digest under the
@@ -862,9 +976,9 @@ Table of Contents
    Over HTTP/1.1 [RFC9112], parallel appends use separate connections,
    one append per connection at a time.  The following rules apply:
 
-   *  A client MUST NOT use more than max-parallel connections for
-      appends to one upload.  Browsers are additionally limited by their
-      per-origin connection limits.
+   *  If max-parallel is present, a client MUST NOT use more connections
+      for appends to one upload than that value.  Browsers are
+      additionally limited by their per-origin connection limits.
 
    *  HTTP/1.1 has no per-request flow control.  A client MUST NOT start
       an append outside the window, and a recipient SHOULD reject such
@@ -924,6 +1038,10 @@ Table of Contents
 
                            Table 2: Problem Types
 
+   A repeated append for a range that is already stored, or for one that
+   another append is still writing, is not a conflict when the content
+   is identical; see Section 5.3.
+
    Problem details for "upload-blocked" MUST NOT identify the inspection
    engine, signature, or policy rule that matched.
 
@@ -947,7 +1065,7 @@ Table of Contents
    A digest sent by the client is only a claim.  Servers and
    intermediaries can use it to detect errors or to look up earlier
    verdicts, but have to verify it against the actual content before
-   relying on it (Section 11.3.7).
+   relying on it (Section 11.3.8).
 
    The reorder window bounds how much out-of-order data is buffered per
    upload, but an attacker can still open many uploads.  Servers and
@@ -1017,9 +1135,9 @@ Table of Contents
    [RESUMABLE]
               Kleidl, M., Zhang, G., and L. Pardue, "Resumable Uploads
               for HTTP", Work in Progress, Internet-Draft, draft-ietf-
-              httpbis-resumable-upload-12, 6 July 2026,
+              httpbis-resumable-upload-13, 6 October 2026,
               <https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-
-              resumable-upload-12>.
+              resumable-upload-13>.
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
@@ -1088,8 +1206,13 @@ Acknowledgments
    This document builds on the work of the authors of [RESUMABLE] and
    [BYTERANGE], and on the tus protocol [TUS].
 
-Author's Address
+Authors' Addresses
 
    Santosh Pallagatti
    Zscaler
    Email: santosh.pallagatti@gmail.com
+
+
+   Akshat Maheshwari
+   Zscaler
+   Email: akshatmaheshwari1995@gmail.com
