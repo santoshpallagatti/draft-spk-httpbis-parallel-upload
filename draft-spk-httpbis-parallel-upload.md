@@ -42,11 +42,11 @@ normative:
   RFC9457:
   RFC9530:
   RFC9651:
+  RFC8470:
+  RFC9218:
 
 informative:
   BYTERANGE: I-D.ietf-httpapi-patch-byterange
-  RFC8470:
-  RFC9218:
   TUS:
     title: "tus resumable upload protocol, version 1.0.0"
     target: https://tus.io/protocols/resumable-upload
@@ -61,12 +61,12 @@ informative:
 The resumable upload protocol lets a client continue an interrupted
 upload, but the upload has to be sent in order, one request at a time.
 This document extends that protocol so that a client can send different
-parts of the same upload in parallel. The amount of data that may arrive
-out of order is limited by a reorder window, so servers and
-intermediaries only need to buffer a bounded amount. The document also
-describes how intermediaries that inspect uploads (for data loss
-prevention or malware scanning, say) can continue to do so, and how the
-extension behaves over HTTP/1.1, HTTP/2, and HTTP/3.
+parts of the same upload in parallel. Servers and intermediaries can
+limit both the number of concurrent requests and the amount of data
+that arrives out of order. The document also describes how
+intermediaries that inspect uploads (for data loss prevention or
+malware scanning, say) can continue to do so, and how the extension
+behaves over HTTP/1.1, HTTP/2, and HTTP/3.
 
 
 --- middle
@@ -80,19 +80,12 @@ has to start exactly at that offset. {{Section 4.6 of RESUMABLE}}
 forbids a client from transferring data for the same upload in
 parallel.
 
-Sequential transfer limits throughput. A single TCP or QUIC connection
-is limited by its congestion window and round-trip time, and streams
-multiplexed on one HTTP/2 or HTTP/3 connection share a single
-congestion controller. On long or lossy paths, one connection often
-uses a fraction of the available capacity. Sequential appends also add
-an idle round trip between appends, and one slow append delays
-everything after it.
-
 HTTP has had a standard mechanism for parallel downloads since
 HTTP/1.1: a client requests different byte ranges of the same resource
-at the same time using the Range header field (Section 14.2 of
-{{RFC9110}}), and download managers and cloud storage clients rely on
-it. Uploads have no counterpart. Section 14.5 of {{RFC9110}} describes
+at the same time using the Range header field
+({{Section 14.2 of RFC9110}}), and download managers and cloud storage
+clients rely on it. Uploads have no counterpart.
+{{Section 14.5 of RFC9110}} describes
 Content-Range in a PUT request but leaves its handling undefined, and
 {{RESUMABLE}} requires appends to be sequential.
 
@@ -121,7 +114,9 @@ this extension simply keeps using the sequential protocol.
 The main motivation is large uploads over paths where a single
 connection cannot use the available bandwidth: video and audio, disk
 images and backups, and datasets or model files that often run to
-several gigabytes.
+several gigabytes. {{h2h3}} explains which parts of the gain come from
+parallel appends on one connection and which need several
+connections.
 
 Uploads to AI services are a growing case. Users attach documents,
 recordings, and video for a model to analyze, and the model cannot
@@ -172,8 +167,11 @@ Received ranges:
   stored.
 
 Tail append:
-: An append that ends at the upload length and carries Upload-Complete
-  set to true. Without it the upload cannot complete.
+: The append that carries Upload-Complete set to true. With explicit
+  commit it is an empty append at the upload length. With automatic
+  commit it is normally the data append that ends at the upload length,
+  although an empty append at the upload length is also accepted (see
+  {{completion}}). Without it the upload cannot complete.
 
 Inspecting intermediary:
 : An intermediary that examines the content of an upload before
@@ -188,8 +186,8 @@ range includes start and excludes end. "MiB" means 1,048,576 bytes.
 
 A client asks for parallel mode when it creates an upload. The server,
 and any intermediary on the path, answer with the limits they accept:
-how many appends may be in progress at once and how large the reorder
-window is. Intermediaries can only make these limits stricter.
+how many appends may be in progress at once, how large the reorder
+window is, or both. Intermediaries can only make these limits stricter.
 
 The client then sends several appends at the same time, each covering
 its own byte range. Every append has to end within the reorder window,
@@ -290,16 +288,15 @@ response field of {{RESUMABLE}}:
 
 max-parallel:
 : An Integer. The maximum number of appends to this upload that may be
-  in progress at the same time. A value of 1 means the upload is
-  sequential. If the parameter is absent, this field places no limit on
-  the number of appends; concurrency is then bounded only by the reorder
-  window and by what the server accepts at the time
-  ({{server-window}}).
+  in progress at the same time. A value of 1 in the upload creation
+  response means the upload is sequential ({{fallback}}). If the
+  parameter is absent, this field places no limit on the number of
+  appends; concurrency is then bounded only by the reorder window and by
+  what the server accepts at the time ({{server-window}}).
 
 reorder-window:
-: An Integer. The reorder window W in bytes. If absent while
-  max-parallel is greater than 1, the window is unlimited, that is,
-  equal to the upload length.
+: An Integer. The reorder window W in bytes. If absent, the window is
+  unlimited, that is, equal to the upload length.
 
 append-alignment:
 : An Integer. The offset of every append, and the length of every
@@ -313,8 +310,10 @@ commit:
 
 A server that accepts parallel mode MUST include at least one of
 max-parallel with a value greater than 1, or reorder-window, in the
-Upload-Limit field of the upload creation response and of every offset
-retrieval response. A server that cares only about how much
+Upload-Limit field of the upload creation response, and MUST include
+its current values of these parameters in every later Upload-Limit
+field it sends for the upload, including in offset retrieval
+responses. A server that cares only about how much
 out-of-order data it has to hold can send reorder-window alone; one
 that cares only about the number of concurrent requests can send
 max-parallel alone.
@@ -324,7 +323,7 @@ max-parallel alone.
 An intermediary MAY modify the Upload-Limit field in a response it
 forwards, but only in ways that make the limits stricter:
 
-* it MAY lower max-parallel, including to 1;
+* it MAY lower max-parallel, or add it if absent;
 * it MAY lower reorder-window, or add it if absent;
 * it MAY replace append-alignment with a multiple of the current value,
   or add it if absent;
@@ -346,21 +345,45 @@ intermediary that takes over parallel mode on the client-facing hop
 it MAY advertise its own limits, including larger ones, because it
 services them itself.
 
+An intermediary that tightens a limit MUST enforce the value it
+advertised. The server knows only its own limits, so it would accept an
+append that breaks a tighter one. The intermediary therefore rejects or
+delays such an append itself, in the same way a server does
+({{server-window}}, {{h2h3-flow}}).
+
+Changing commit from "auto" to "explicit" works with any server that
+implements this document, because such a server accepts an empty
+append as the tail append in either mode ({{completion}}). An
+intermediary that makes this change tracks which ranges the server has
+received and applies the explicit-commit rules toward the client: if
+the client sends the commit request while ranges are still missing, the
+intermediary responds with 409 (Conflict) and "incomplete-ranges"
+instead of forwarding it ({{commit-explicit}}).
+
 ## Falling Back to Sequential Uploads {#fallback}
 
-The upload is in parallel mode only if the client sent Upload-Parallel
-with the value true and the response to upload creation contains either
-max-parallel greater than 1 or reorder-window. Otherwise, client and
-server MUST follow
-{{RESUMABLE}} without the changes in this document. A value of 1 for
-max-parallel always means sequential.
+An upload is in parallel mode if, and only if, the client sent
+Upload-Parallel with the value true and the Upload-Limit field in the
+response to upload creation contains either max-parallel with a value
+greater than 1, or reorder-window without max-parallel. A max-parallel
+value of 1 in that response always means sequential, even when
+reorder-window is also present. In every other case, client and server
+MUST follow {{RESUMABLE}} without the changes in this document. This is
+the only rule that decides the mode; other sections refer to it.
 
-Limits can change during an upload. Any response for the upload
-resource, whether to upload creation, to an append, or to offset
-retrieval, MAY carry a different Upload-Limit, and a client MUST apply
-the most recent values to appends it starts after receiving them.
-Appends already in progress are not invalidated by a change
-({{server-window}}).
+The mode is fixed when the upload is created, but the limits can change
+during the upload. Any response for the upload resource, whether to an
+append or to offset retrieval, MAY carry a different Upload-Limit. Each
+Upload-Limit field carries the complete current values: a parameter that
+is absent from it has the default meaning given in {{limits}}, not its
+previous value. A server MAY raise or lower its own limits. An
+intermediary recomputes its values from each new value it receives from
+upstream and still only tightens it ({{tightening}}). A client MUST
+apply the most recent values to appends it starts after receiving them,
+and a change never invalidates an append already in progress
+({{server-window}}). A later max-parallel of 1 limits the client to one
+append at a time but does not end parallel mode; Upload-Received and the
+other rules of this document still apply.
 
 
 # Parallel Appends {#appends}
@@ -400,9 +423,9 @@ parallel mode, so that a recipient knows the full range before the
 content arrives.
 
 If max-parallel is present, a client MUST NOT have more than that many
-appends to the same upload in progress at once. An append is in progress from when its
-request starts until its response is received or the request is
-abandoned.
+appends to the same upload in progress at once. An append is in
+progress from when its request starts until its response is received
+or the request is abandoned.
 
 A client SHOULD include a Content-Digest field {{RFC9530}} on each
 append so that the server and intermediaries can verify each range on
@@ -415,7 +438,7 @@ Content-Type: application/partial-upload
 Upload-Offset: 4194304
 Upload-Complete: ?0
 Content-Length: 2097152
-Content-Digest: sha-256=:(base64 digest):
+Content-Digest: sha-256=:(base64-encoded SHA-256 of the content):
 
 [2097152 bytes]
 ~~~
@@ -487,11 +510,18 @@ other append MUST carry Upload-Complete with the value false.
 
 ## Automatic Commit {#commit-auto}
 
-When commit is "auto", the tail append is the data append that ends at
-L. A client MUST set Upload-Complete to true on the append that ends at
-L and on no other append. A server that receives Upload-Complete set to
-true on an append that does not end at L MUST reject it with status 400
-(Bad Request).
+When commit is "auto", the tail append is normally the data append that
+ends at L. A client MUST set Upload-Complete to true on the append that
+ends at L and on no other append. A server that receives Upload-Complete
+set to true on an append that does not end at L MUST reject it with
+status 400 (Bad Request).
+
+In either commit mode, a server MUST also accept an empty append at
+offset L carrying Upload-Complete set to true as the tail append, if it
+has not already received one. {{RESUMABLE}} already allows such an
+append to complete an upload whose content has all arrived; accepting
+it in automatic mode is what lets an intermediary change the commit
+mode ({{tightening}}).
 
 If gaps remain when the tail append has been received, the server
 responds to the tail append with 204 (No Content) and the current
@@ -521,12 +551,13 @@ which helps intermediaries that hold it ({{hold-tail}}).
 # Changes to Resumable Upload Rules in Parallel Mode {#updates}
 
 For uploads in parallel mode only, this document changes the following
-rules of {{RESUMABLE}}. Section numbers refer to draft version 12. All
-other rules apply unchanged.
+rules of {{RESUMABLE}}. Section numbers refer to version 13 of that
+draft; each rule is also described in words, so that it can be found if
+the numbering changes. All other rules apply unchanged.
 
 | Rule in RESUMABLE | Change in parallel mode |
 |:---|:---|
-| Section 4.6: a client must not transfer data for one upload in parallel | Up to max-parallel appends may be in progress ({{append-requests}}). |
+| Section 4.6: a client must not transfer data for one upload in parallel | Several appends may be in progress, within the limits of {{limits}} ({{append-requests}}). |
 | Section 4.6: a new request terminates the older one | Applies per overlapping byte range ({{overlap}}). |
 | Section 4.4.2: Upload-Offset must match the current offset, otherwise 409 | Any append inside the reorder window is accepted ({{window}}). |
 | Upload-Complete marks the final append | Marks the tail append; completion requires full coverage ({{completion}}). |
@@ -549,9 +580,12 @@ stale requests.
   in progress at all times, because the window cannot slide until that
   range arrives.
 * If the append at the contiguous offset is much slower than the
-  others, a client MAY send the same range again on another stream or
-  connection and cancel the other copy when one finishes. Both copies
-  count against max-parallel while in progress.
+  others, a client MAY replace it by sending the same range again on
+  another stream or connection. Because the server terminates the older
+  of two appends for the same range ({{overlap}}), the new request
+  replaces the old one rather than racing it, so the client SHOULD
+  cancel the old request when it sends the new one. Only the new request
+  then counts against max-parallel.
 * After any failed or abandoned append, a client SHOULD perform offset
   retrieval and re-send only ranges missing from Upload-Received.
 * A client that receives status 409 with the problem type
@@ -586,18 +620,20 @@ status 409 (Conflict), the problem type "offset-outside-window", and
 the current Upload-Offset, unless it delays the append as described in
 {{h2h3-flow}}.
 
-A server MAY reject an append that exceeds max-parallel with status 429
-(Too Many Requests), the problem type "too-many-parallel", and a
-Retry-After field.
+A server MAY reject an append with status 429 (Too Many Requests), the
+problem type "too-many-parallel", and a Retry-After field when accepting
+it would exceed max-parallel or, if max-parallel is absent, the number
+of concurrent appends the server can currently handle.
 
 A server MUST reject an append whose offset or length violates
 append-alignment with status 400 (Bad Request) and the problem type
 "misaligned-append".
 
-A server MAY lower its limits during an upload, for example under load,
-and signals new values in its next responses. It MUST NOT reject an
-append that was inside the limits it last advertised when the append
-started solely because the limits changed.
+A server MAY raise or lower its limits during an upload, for example as
+its load changes, and signals new values in its next responses
+({{fallback}}). It MUST NOT reject an append that was inside the limits
+it last advertised when the append started solely because the limits
+changed.
 
 ## Storage and Visibility {#server-storage}
 
@@ -652,8 +688,9 @@ An intermediary that implements this document:
 * MAY tighten Upload-Limit as described in {{tightening}}, and MUST
   NOT loosen it;
 * MAY force sequential behavior by removing Upload-Parallel from an
-  upload creation request or by setting max-parallel to 1 in the
-  response;
+  upload creation request or by setting max-parallel to 1 in the upload
+  creation response ({{fallback}});
+* MUST enforce any limit it tightens ({{tightening}});
 * MUST NOT remove or alter Upload-Received, except as described in
   {{hold-tail-retrieval}};
 * when it balances load across servers, MUST meet the consistency
@@ -697,10 +734,21 @@ order:
 * MAY use Content-Digest to recognize a retried range it has already
   inspected and skip inspecting it again.
 
+In-order inspection needs a single view of the whole upload. When
+several instances of an intermediary share the load, all requests for
+one upload resource MUST reach the same instance, or the instances MUST
+share the buffered and inspection state of the upload. An instance that
+receives an append for an upload whose earlier content it has not
+inspected, and cannot obtain that state, MUST treat this as lost state
+({{inspect-failure}}).
+
 Some formats can only be analyzed as a whole, such as archives that
-keep their index at the end. For those, an intermediary MAY set
-reorder-window to the upload length and inspect the complete content
-before releasing the tail.
+keep their index at the end. For those, an intermediary keeps the
+content as it passes and inspects the complete content before releasing
+the tail. This needs storage for the whole upload but not a larger
+reorder window, since the content still arrives in order within the
+window; an intermediary MUST NOT raise reorder-window for this purpose
+({{tightening}}).
 
 ### Forwarding Strategies {#forwarding}
 
@@ -740,21 +788,23 @@ it.
 With automatic commit the tail append can be large. The intermediary
 MAY forward all of it except a final part, as an append with
 Upload-Complete set to false, and hold only that final part as the tail
-it forwards later. The final part SHOULD be one append-alignment unit
-if an alignment applies. With explicit commit the tail append is empty
-and nothing needs to be split.
-
-An intermediary MAY set commit to "explicit" when tightening limits
-({{tightening}}) so that the tail append is always empty.
+it forwards later. The forwarded part is not a tail append, so if
+append-alignment applies it MUST end at a multiple of append-alignment:
+the intermediary forwards up to the largest such multiple that is less
+than the upload length and holds the rest. If no such multiple lies
+within the tail append, the intermediary holds all of it. With explicit
+commit the tail append is empty and nothing needs to be split.
 
 ### Offset Retrieval While Holding {#hold-tail-retrieval}
 
-While it holds the tail append, the intermediary SHOULD answer offset
-retrieval requests for the upload itself, or modify the server's
+With automatic commit, the held tail carries content the server has
+not yet received. While it holds it, the intermediary SHOULD answer
+offset retrieval requests for the upload itself, or modify the server's
 response, so that the held range is reported as received and the
 Upload-Inspection field ({{upload-inspection}}) is included. Otherwise
 the client would see a gap at the end and re-send the tail, which is
-safe but wasteful.
+safe but wasteful. With explicit commit no content is held, and the
+intermediary only adds Upload-Inspection to these responses.
 
 ### Verdicts {#verdicts}
 
@@ -811,13 +861,17 @@ An intermediary that abandons an upload, for example when the client
 disconnects or the intermediary itself restarts, SHOULD cancel the
 upload at the server rather than rely on expiry.
 
-An intermediary that has lost its buffered or inspection state for an
-upload MUST NOT continue to answer offset retrieval on the server's
-behalf ({{hold-tail-retrieval}}); it forwards those requests, so the
-client learns the state the server actually has and re-sends whatever
-is missing. It MUST NOT treat any part of the upload as already
-inspected unless it kept the inspection state, and otherwise inspects
-again from the contiguous offset or blocks the upload.
+An intermediary that loses its buffered or inspection state for an
+upload, for example after a restart, cannot recover by inspecting again.
+The content before the contiguous offset is already at the server and
+will not be sent again, and in-order engines would also miss the start
+of the content, where file types are recognized. The intermediary
+therefore MUST NOT forward the tail append for that upload. It MUST
+cancel the upload at the server and respond to the client's requests for
+it with 410 (Gone), so that the client creates a new upload
+({{client-reqs}}). An intermediary that terminates parallel mode
+({{translation}}) acts as the server on the client-facing hop and
+follows {{server-failure}} in the same way.
 
 If forwarding a held tail append fails because the upload has expired
 or the server has lost it, the intermediary reports the failure to the
@@ -840,10 +894,22 @@ mismatch as blocked.
 
 Over HTTP/2 {{RFC9113}} and HTTP/3 {{RFC9114}}, each append is a
 request on its own stream, and several appends can share one
-connection. Because streams on one connection share one congestion
-controller, a client MAY also open additional connections, within
-max-parallel, when a single connection does not use the available
-capacity.
+connection. Parallel appends on one connection already remove the idle
+round trip that sequential appends spend waiting for each response, and
+a slow append no longer holds up the ranges after it. With HTTP/3, a
+lost packet also delays only the stream it belongs to; with HTTP/2 it
+delays every stream on the connection.
+
+Parallel appends on one connection do not raise that connection's
+throughput limit, however. All streams on a connection share one
+congestion controller, whether the transport is TCP or QUIC, so on a
+path with a long round-trip time or packet loss a single connection can
+still use only part of the available capacity. Only additional
+connections, each with its own congestion controller, lift that limit.
+A client MAY therefore spread appends over more than one connection
+when a single connection does not use the available capacity, subject
+to {{fairness}}. The total number of appends in progress still stays
+within max-parallel when it is present.
 
 ### Priorities {#h2h3-priority}
 
@@ -919,8 +985,8 @@ one append per connection at a time. The following rules apply:
   append outside the window, and a recipient SHOULD reject such an
   append with 409 and "offset-outside-window" rather than delay it.
 * HTTP/1.1 has no priorities. A client keeps the append at the
-  contiguous offset in progress first and MAY send it again on a second
-  connection if it stalls ({{client-reqs}}).
+  contiguous offset in progress first and MAY replace it with a new
+  request on another connection if it stalls ({{client-reqs}}).
 * Some intermediaries do not forward informational responses. A client
   MUST NOT depend on receiving 104 (Upload Resumption Supported) and
   SHOULD create the upload with an empty body, taking the upload
@@ -931,8 +997,31 @@ one append per connection at a time. The following rules apply:
 * A client MAY send Expect: 100-continue, and MUST continue if no 100
   (Continue) response arrives, as described in {{RFC9110}}.
 
-If max-parallel is absent or 1, client and server use the sequential
-behavior of {{RESUMABLE}} unchanged.
+If the upload is not in parallel mode ({{fallback}}), client and server
+use the sequential behavior of {{RESUMABLE}} unchanged.
+
+## Congestion Control and Fairness {#fairness}
+
+An upload that uses several connections can take more than one
+connection's share of a bottleneck it shares with other traffic.
+Additional connections are meant for paths where a single connection is
+limited by round-trip time or loss, not for gaining a larger share of a
+congested link. Therefore:
+
+* A client SHOULD start with one connection and open additional
+  connections only while doing so increases the upload's throughput. It
+  SHOULD stop adding connections when it does not.
+* A client SHOULD NOT use more connections for one upload than it
+  needs, and MUST stay within max-parallel when it is present.
+* Servers and intermediaries can limit concurrency for an upload with
+  max-parallel, and can reject excess appends with 429 (Too Many
+  Requests) ({{server-window}}).
+* Each connection runs the congestion control specified for its
+  transport. This document does not change congestion control.
+
+Multipath extensions to QUIC, under development in the IETF, could
+offer a single connection with a separate congestion controller for
+each path. This document does not depend on them.
 
 
 # Problem Types {#problems}
@@ -947,7 +1036,7 @@ form https://iana.org/assignments/http-problem-types#NAME.
 | range-conflict | 409 | The append overlaps received bytes with different content. |
 | incomplete-ranges | 409 | An explicit commit was sent while gaps remain. The response includes Upload-Received. |
 | misaligned-append | 400 | The offset or length violates append-alignment. |
-| too-many-parallel | 429 | More than max-parallel appends are in progress. |
+| too-many-parallel | 429 | More appends are in progress than max-parallel allows, or than the server can currently handle. |
 | upload-blocked | 403 | An inspecting intermediary blocked the upload by policy. |
 {: #tab-problems title="Problem Types"}
 
@@ -965,11 +1054,19 @@ The security considerations of {{RESUMABLE}} apply to this extension as
 well.
 
 A client cannot get more parallelism than every party on the path
-allows, because intermediaries can only tighten the limits
-({{tightening}}). An inspecting intermediary controls whether an upload
-is committed by holding its tail append ({{hold-tail}}), so content
-cannot be committed without passing through any inspection on the
-path.
+allows: intermediaries can only tighten the limits, and they enforce the
+limits they tighten ({{tightening}}), so a client that ignores them
+cannot overrun an intermediary's buffers.
+
+An inspecting intermediary controls whether an upload is committed by
+holding its tail append ({{hold-tail}}). This relies on the intermediary
+seeing all of the upload's content in order. An attacker could try to
+break that view, for example by steering appends for one upload to
+different instances of a load-balanced intermediary, or by provoking a
+restart partway through an upload. An intermediary therefore keeps
+each upload on one instance or shares its state ({{in-order}}), and
+cancels any upload it cannot inspect completely rather than releasing
+it ({{inspect-failure}}).
 
 An attacker may try to split content across appends so that no single
 append matches an inspection policy. Processing appends in order,
@@ -1022,9 +1119,11 @@ Transfer Protocol (HTTP) Field Name Registry" established by
 
 ## Upload-Limit Parameters
 
-If {{RESUMABLE}} establishes a registry of Upload-Limit parameters, IANA
-is asked to register max-parallel, reorder-window, append-alignment,
-and commit, with a reference to {{limits}} of this document.
+{{RESUMABLE}} does not establish a registry for Upload-Limit
+parameters, so the parameters max-parallel, reorder-window,
+append-alignment, and commit are defined in {{limits}} of this document
+without a registration. If such a registry is created, IANA is asked to
+add these four parameters to it, with a reference to {{limits}}.
 
 ## HTTP Problem Types
 
