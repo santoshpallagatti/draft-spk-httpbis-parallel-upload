@@ -11,12 +11,12 @@
        The resumable upload protocol lets a client continue an interrupted
 upload, but the upload has to be sent in order, one request at a time.
 This document extends that protocol so that a client can send different
-parts of the same upload in parallel. The amount of data that may arrive
-out of order is limited by a reorder window, so servers and
-intermediaries only need to buffer a bounded amount. The document also
-describes how intermediaries that inspect uploads (for data loss
-prevention or malware scanning, say) can continue to do so, and how the
-extension behaves over HTTP/1.1, HTTP/2, and HTTP/3. 
+parts of the same upload in parallel. Servers and intermediaries can
+limit both the number of concurrent requests and the amount of data
+that arrives out of order. The document also describes how
+intermediaries that inspect uploads (for data loss prevention or
+malware scanning, say) can continue to do so, and how the extension
+behaves over HTTP/1.1, HTTP/2, and HTTP/3. 
     " name="description">
 <meta content="xml2rfc 3.34.1" name="generator">
 <meta content="resumable upload" name="keyword">
@@ -1057,7 +1057,7 @@ svg {
 </tr></thead>
 <tfoot><tr>
 <td class="left">Pallagatti &amp; Maheshwari</td>
-<td class="center">Expires 10 April 2027</td>
+<td class="center">Expires 14 April 2027</td>
 <td class="right">[Page]</td>
 </tr></tfoot>
 </table>
@@ -1070,12 +1070,12 @@ svg {
 <dd class="internet-draft">draft-spk-httpbis-parallel-upload-latest</dd>
 <dt class="label-published">Published:</dt>
 <dd class="published">
-<time datetime="2026-10-07" class="published">7 October 2026</time>
+<time datetime="2026-10-11" class="published">11 October 2026</time>
     </dd>
 <dt class="label-intended-status">Intended Status:</dt>
 <dd class="intended-status">Standards Track</dd>
 <dt class="label-expires">Expires:</dt>
-<dd class="expires"><time datetime="2027-04-10">10 April 2027</time></dd>
+<dd class="expires"><time datetime="2027-04-14">14 April 2027</time></dd>
 <dt class="label-authors">Authors:</dt>
 <dd class="authors">
 <div class="author">
@@ -1095,12 +1095,12 @@ svg {
 <p id="section-abstract-1">The resumable upload protocol lets a client continue an interrupted
 upload, but the upload has to be sent in order, one request at a time.
 This document extends that protocol so that a client can send different
-parts of the same upload in parallel. The amount of data that may arrive
-out of order is limited by a reorder window, so servers and
-intermediaries only need to buffer a bounded amount. The document also
-describes how intermediaries that inspect uploads (for data loss
-prevention or malware scanning, say) can continue to do so, and how the
-extension behaves over HTTP/1.1, HTTP/2, and HTTP/3.<a href="#section-abstract-1" class="pilcrow">¶</a></p>
+parts of the same upload in parallel. Servers and intermediaries can
+limit both the number of concurrent requests and the amount of data
+that arrives out of order. The document also describes how
+intermediaries that inspect uploads (for data loss prevention or
+malware scanning, say) can continue to do so, and how the extension
+behaves over HTTP/1.1, HTTP/2, and HTTP/3.<a href="#section-abstract-1" class="pilcrow">¶</a></p>
 </section>
 <section class="note rfcEditorRemove" id="section-note.1">
       <h2 id="name-about-this-document">
@@ -1136,7 +1136,7 @@ extension behaves over HTTP/1.1, HTTP/2, and HTTP/3.<a href="#section-abstract-1
         time. It is inappropriate to use Internet-Drafts as reference
         material or to cite them other than as "work in progress."<a href="#section-boilerplate.1-3" class="pilcrow">¶</a></p>
 <p id="section-boilerplate.1-4">
-        This Internet-Draft will expire on 10 April 2027.<a href="#section-boilerplate.1-4" class="pilcrow">¶</a></p>
+        This Internet-Draft will expire on 14 April 2027.<a href="#section-boilerplate.1-4" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="copyright">
@@ -1313,6 +1313,9 @@ extension behaves over HTTP/1.1, HTTP/2, and HTTP/3.<a href="#section-abstract-1
               <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.2">
                 <p id="section-toc.1-1.12.2.2.1"><a href="#section-12.2" class="auto internal xref">12.2</a>.  <a href="#name-http-11" class="internal xref">HTTP/1.1</a></p>
 </li>
+              <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.12.2.3">
+                <p id="section-toc.1-1.12.2.3.1"><a href="#section-12.3" class="auto internal xref">12.3</a>.  <a href="#name-congestion-control-and-fair" class="internal xref">Congestion Control and Fairness</a></p>
+</li>
             </ul>
 </li>
           <li class="compact toc ulBare ulEmpty" id="section-toc.1-1.13">
@@ -1367,37 +1370,31 @@ offset: all bytes before the offset have been stored, and each append
 has to start exactly at that offset. <span><a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-resumable-upload-13#section-4.6" class="relref">Section 4.6</a> of [<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>
 forbids a client from transferring data for the same upload in
 parallel.<a href="#section-1-1" class="pilcrow">¶</a></p>
-<p id="section-1-2">Sequential transfer limits throughput. A single TCP or QUIC connection
-is limited by its congestion window and round-trip time, and streams
-multiplexed on one HTTP/2 or HTTP/3 connection share a single
-congestion controller. On long or lossy paths, one connection often
-uses a fraction of the available capacity. Sequential appends also add
-an idle round trip between appends, and one slow append delays
-everything after it.<a href="#section-1-2" class="pilcrow">¶</a></p>
-<p id="section-1-3">HTTP has had a standard mechanism for parallel downloads since
+<p id="section-1-2">HTTP has had a standard mechanism for parallel downloads since
 HTTP/1.1: a client requests different byte ranges of the same resource
-at the same time using the Range header field (Section 14.2 of
-<span>[<a href="#RFC9110" class="cite xref">RFC9110</a>]</span>), and download managers and cloud storage clients rely on
-it. Uploads have no counterpart. Section 14.5 of <span>[<a href="#RFC9110" class="cite xref">RFC9110</a>]</span> describes
+at the same time using the Range header field
+(<span><a href="https://rfc-editor.org/rfc/rfc9110#section-14.2" class="relref">Section 14.2</a> of [<a href="#RFC9110" class="cite xref">RFC9110</a>]</span>), and download managers and cloud storage
+clients rely on it. Uploads have no counterpart.
+<span><a href="https://rfc-editor.org/rfc/rfc9110#section-14.5" class="relref">Section 14.5</a> of [<a href="#RFC9110" class="cite xref">RFC9110</a>]</span> describes
 Content-Range in a PUT request but leaves its handling undefined, and
-<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> requires appends to be sequential.<a href="#section-1-3" class="pilcrow">¶</a></p>
-<p id="section-1-4">Parallel uploads are nevertheless widely deployed in service-specific
+<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> requires appends to be sequential.<a href="#section-1-2" class="pilcrow">¶</a></p>
+<p id="section-1-3">Parallel uploads are nevertheless widely deployed in service-specific
 forms: cloud storage APIs, and the Concatenation extension of the tus
 protocol <span>[<a href="#TUS" class="cite xref">TUS</a>]</span>, upload parts as separate resources and join them at
 the end. What is missing is a standard way for a client to send several
 byte ranges of one upload at the same time. The Byte Range PATCH draft
 <span>[<a href="#BYTERANGE" class="cite xref">BYTERANGE</a>]</span> mentions parallel uploads and leaves them for "a later
-document".<a href="#section-1-4" class="pilcrow">¶</a></p>
-<p id="section-1-5">This document defines such an extension for <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. A client
+document".<a href="#section-1-3" class="pilcrow">¶</a></p>
+<p id="section-1-4">This document defines such an extension for <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. A client
 asks for parallel mode when it creates the upload (<a href="#negotiation" class="auto internal xref">Section 4</a>) and
 then sends appends for different byte ranges at the same time, within a
 window (<a href="#appends" class="auto internal xref">Section 5</a>). The server reports which ranges it has in a new
 response field (<a href="#upload-received" class="auto internal xref">Section 6</a>), and <a href="#completion" class="auto internal xref">Section 7</a> says when the
 upload is complete. Requirements for servers and for intermediaries are
-in <a href="#server-reqs" class="auto internal xref">Section 10</a> and <a href="#intermediary-reqs" class="auto internal xref">Section 11</a>.<a href="#section-1-5" class="pilcrow">¶</a></p>
-<p id="section-1-6">Unless this document says otherwise (<a href="#updates" class="auto internal xref">Section 8</a>), all rules of
+in <a href="#server-reqs" class="auto internal xref">Section 10</a> and <a href="#intermediary-reqs" class="auto internal xref">Section 11</a>.<a href="#section-1-4" class="pilcrow">¶</a></p>
+<p id="section-1-5">Unless this document says otherwise (<a href="#updates" class="auto internal xref">Section 8</a>), all rules of
 <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> still apply. A client or server that does not implement
-this extension simply keeps using the sequential protocol.<a href="#section-1-6" class="pilcrow">¶</a></p>
+this extension simply keeps using the sequential protocol.<a href="#section-1-5" class="pilcrow">¶</a></p>
 <div id="use-cases">
 <section id="section-1.1">
         <h3 id="name-use-cases">
@@ -1406,7 +1403,9 @@ this extension simply keeps using the sequential protocol.<a href="#section-1-6"
 <p id="section-1.1-1">The main motivation is large uploads over paths where a single
 connection cannot use the available bandwidth: video and audio, disk
 images and backups, and datasets or model files that often run to
-several gigabytes.<a href="#section-1.1-1" class="pilcrow">¶</a></p>
+several gigabytes. <a href="#h2h3" class="auto internal xref">Section 12.1</a> explains which parts of the gain come from
+parallel appends on one connection and which need several
+connections.<a href="#section-1.1-1" class="pilcrow">¶</a></p>
 <p id="section-1.1-2">Uploads to AI services are a growing case. Users attach documents,
 recordings, and video for a model to analyze, and the model cannot
 start until the upload has finished, so upload time shows up directly
@@ -1469,8 +1468,11 @@ stored.<a href="#section-2-4.8.1" class="pilcrow">¶</a></p>
         <dd class="break"></dd>
 <dt id="section-2-4.9">Tail append:</dt>
         <dd style="margin-left: 1.5em" id="section-2-4.10">
-          <p id="section-2-4.10.1">An append that ends at the upload length and carries Upload-Complete
-set to true. Without it the upload cannot complete.<a href="#section-2-4.10.1" class="pilcrow">¶</a></p>
+          <p id="section-2-4.10.1">The append that carries Upload-Complete set to true. With explicit
+commit it is an empty append at the upload length. With automatic
+commit it is normally the data append that ends at the upload length,
+although an empty append at the upload length is also accepted (see
+<a href="#completion" class="auto internal xref">Section 7</a>). Without it the upload cannot complete.<a href="#section-2-4.10.1" class="pilcrow">¶</a></p>
 </dd>
         <dd class="break"></dd>
 <dt id="section-2-4.11">Inspecting intermediary:</dt>
@@ -1492,8 +1494,8 @@ range includes start and excludes end. "MiB" means 1,048,576 bytes.<a href="#sec
       </h2>
 <p id="section-3-1">A client asks for parallel mode when it creates an upload. The server,
 and any intermediary on the path, answer with the limits they accept:
-how many appends may be in progress at once and how large the reorder
-window is. Intermediaries can only make these limits stricter.<a href="#section-3-1" class="pilcrow">¶</a></p>
+how many appends may be in progress at once, how large the reorder
+window is, or both. Intermediaries can only make these limits stricter.<a href="#section-3-1" class="pilcrow">¶</a></p>
 <p id="section-3-2">The client then sends several appends at the same time, each covering
 its own byte range. Every append has to end within the reorder window,
 which starts at the contiguous offset. As gaps at the start of the
@@ -1613,18 +1615,17 @@ response field of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</
           <dt id="section-4.2-2.1">max-parallel:</dt>
           <dd style="margin-left: 1.5em" id="section-4.2-2.2">
             <p id="section-4.2-2.2.1">An Integer. The maximum number of appends to this upload that may be
-in progress at the same time. A value of 1 means the upload is
-sequential. If the parameter is absent, this field places no limit on
-the number of appends; concurrency is then bounded only by the reorder
-window and by what the server accepts at the time
-(<a href="#server-window" class="auto internal xref">Section 10.2</a>).<a href="#section-4.2-2.2.1" class="pilcrow">¶</a></p>
+in progress at the same time. A value of 1 in the upload creation
+response means the upload is sequential (<a href="#fallback" class="auto internal xref">Section 4.4</a>). If the
+parameter is absent, this field places no limit on the number of
+appends; concurrency is then bounded only by the reorder window and by
+what the server accepts at the time (<a href="#server-window" class="auto internal xref">Section 10.2</a>).<a href="#section-4.2-2.2.1" class="pilcrow">¶</a></p>
 </dd>
           <dd class="break"></dd>
 <dt id="section-4.2-2.3">reorder-window:</dt>
           <dd style="margin-left: 1.5em" id="section-4.2-2.4">
-            <p id="section-4.2-2.4.1">An Integer. The reorder window W in bytes. If absent while
-max-parallel is greater than 1, the window is unlimited, that is,
-equal to the upload length.<a href="#section-4.2-2.4.1" class="pilcrow">¶</a></p>
+            <p id="section-4.2-2.4.1">An Integer. The reorder window W in bytes. If absent, the window is
+unlimited, that is, equal to the upload length.<a href="#section-4.2-2.4.1" class="pilcrow">¶</a></p>
 </dd>
           <dd class="break"></dd>
 <dt id="section-4.2-2.5">append-alignment:</dt>
@@ -1643,8 +1644,10 @@ the value is "auto".<a href="#section-4.2-2.8.1" class="pilcrow">¶</a></p>
 </dl>
 <p id="section-4.2-3">A server that accepts parallel mode <span class="bcp14">MUST</span> include at least one of
 max-parallel with a value greater than 1, or reorder-window, in the
-Upload-Limit field of the upload creation response and of every offset
-retrieval response. A server that cares only about how much
+Upload-Limit field of the upload creation response, and <span class="bcp14">MUST</span> include
+its current values of these parameters in every later Upload-Limit
+field it sends for the upload, including in offset retrieval
+responses. A server that cares only about how much
 out-of-order data it has to hold can send reorder-window alone; one
 that cares only about the number of concurrent requests can send
 max-parallel alone.<a href="#section-4.2-3" class="pilcrow">¶</a></p>
@@ -1659,7 +1662,7 @@ max-parallel alone.<a href="#section-4.2-3" class="pilcrow">¶</a></p>
 forwards, but only in ways that make the limits stricter:<a href="#section-4.3-1" class="pilcrow">¶</a></p>
 <ul class="normal">
 <li class="normal" id="section-4.3-2.1">
-            <p id="section-4.3-2.1.1">it <span class="bcp14">MAY</span> lower max-parallel, including to 1;<a href="#section-4.3-2.1.1" class="pilcrow">¶</a></p>
+            <p id="section-4.3-2.1.1">it <span class="bcp14">MAY</span> lower max-parallel, or add it if absent;<a href="#section-4.3-2.1.1" class="pilcrow">¶</a></p>
 </li>
           <li class="normal" id="section-4.3-2.2">
             <p id="section-4.3-2.2.1">it <span class="bcp14">MAY</span> lower reorder-window, or add it if absent;<a href="#section-4.3-2.2.1" class="pilcrow">¶</a></p>
@@ -1686,6 +1689,19 @@ intermediary that takes over parallel mode on the client-facing hop
 (<a href="#translation" class="auto internal xref">Section 11.2</a>) is a different case: there it acts as the server, and
 it <span class="bcp14">MAY</span> advertise its own limits, including larger ones, because it
 services them itself.<a href="#section-4.3-4" class="pilcrow">¶</a></p>
+<p id="section-4.3-5">An intermediary that tightens a limit <span class="bcp14">MUST</span> enforce the value it
+advertised. The server knows only its own limits, so it would accept an
+append that breaks a tighter one. The intermediary therefore rejects or
+delays such an append itself, in the same way a server does
+(<a href="#server-window" class="auto internal xref">Section 10.2</a>, <a href="#h2h3-flow" class="auto internal xref">Section 12.1.2</a>).<a href="#section-4.3-5" class="pilcrow">¶</a></p>
+<p id="section-4.3-6">Changing commit from "auto" to "explicit" works with any server that
+implements this document, because such a server accepts an empty
+append as the tail append in either mode (<a href="#completion" class="auto internal xref">Section 7</a>). An
+intermediary that makes this change tracks which ranges the server has
+received and applies the explicit-commit rules toward the client: if
+the client sends the commit request while ranges are still missing, the
+intermediary responds with 409 (Conflict) and "incomplete-ranges"
+instead of forwarding it (<a href="#commit-explicit" class="auto internal xref">Section 7.2</a>).<a href="#section-4.3-6" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="fallback">
@@ -1693,18 +1709,27 @@ services them itself.<a href="#section-4.3-4" class="pilcrow">¶</a></p>
         <h3 id="name-falling-back-to-sequential-">
 <a href="#section-4.4" class="section-number selfRef">4.4. </a><a href="#name-falling-back-to-sequential-" class="section-name selfRef">Falling Back to Sequential Uploads</a>
         </h3>
-<p id="section-4.4-1">The upload is in parallel mode only if the client sent Upload-Parallel
-with the value true and the response to upload creation contains either
-max-parallel greater than 1 or reorder-window. Otherwise, client and
-server <span class="bcp14">MUST</span> follow
-<span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> without the changes in this document. A value of 1 for
-max-parallel always means sequential.<a href="#section-4.4-1" class="pilcrow">¶</a></p>
-<p id="section-4.4-2">Limits can change during an upload. Any response for the upload
-resource, whether to upload creation, to an append, or to offset
-retrieval, <span class="bcp14">MAY</span> carry a different Upload-Limit, and a client <span class="bcp14">MUST</span> apply
-the most recent values to appends it starts after receiving them.
-Appends already in progress are not invalidated by a change
-(<a href="#server-window" class="auto internal xref">Section 10.2</a>).<a href="#section-4.4-2" class="pilcrow">¶</a></p>
+<p id="section-4.4-1">An upload is in parallel mode if, and only if, the client sent
+Upload-Parallel with the value true and the Upload-Limit field in the
+response to upload creation contains either max-parallel with a value
+greater than 1, or reorder-window without max-parallel. A max-parallel
+value of 1 in that response always means sequential, even when
+reorder-window is also present. In every other case, client and server
+<span class="bcp14">MUST</span> follow <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> without the changes in this document. This is
+the only rule that decides the mode; other sections refer to it.<a href="#section-4.4-1" class="pilcrow">¶</a></p>
+<p id="section-4.4-2">The mode is fixed when the upload is created, but the limits can change
+during the upload. Any response for the upload resource, whether to an
+append or to offset retrieval, <span class="bcp14">MAY</span> carry a different Upload-Limit. Each
+Upload-Limit field carries the complete current values: a parameter that
+is absent from it has the default meaning given in <a href="#limits" class="auto internal xref">Section 4.2</a>, not its
+previous value. A server <span class="bcp14">MAY</span> raise or lower its own limits. An
+intermediary recomputes its values from each new value it receives from
+upstream and still only tightens it (<a href="#tightening" class="auto internal xref">Section 4.3</a>). A client <span class="bcp14">MUST</span>
+apply the most recent values to appends it starts after receiving them,
+and a change never invalidates an append already in progress
+(<a href="#server-window" class="auto internal xref">Section 10.2</a>). A later max-parallel of 1 limits the client to one
+append at a time but does not end parallel mode; Upload-Received and the
+other rules of this document still apply.<a href="#section-4.4-2" class="pilcrow">¶</a></p>
 </section>
 </div>
 </section>
@@ -1753,9 +1778,9 @@ the append writes. A client <span class="bcp14">MUST</span> send Content-Length 
 parallel mode, so that a recipient knows the full range before the
 content arrives.<a href="#section-5.2-2" class="pilcrow">¶</a></p>
 <p id="section-5.2-3">If max-parallel is present, a client <span class="bcp14">MUST NOT</span> have more than that many
-appends to the same upload in progress at once. An append is in progress from when its
-request starts until its response is received or the request is
-abandoned.<a href="#section-5.2-3" class="pilcrow">¶</a></p>
+appends to the same upload in progress at once. An append is in
+progress from when its request starts until its response is received
+or the request is abandoned.<a href="#section-5.2-3" class="pilcrow">¶</a></p>
 <p id="section-5.2-4">A client <span class="bcp14">SHOULD</span> include a Content-Digest field <span>[<a href="#RFC9530" class="cite xref">RFC9530</a>]</span> on each
 append so that the server and intermediaries can verify each range on
 its own.<a href="#section-5.2-4" class="pilcrow">¶</a></p>
@@ -1767,7 +1792,7 @@ Content-Type: application/partial-upload
 Upload-Offset: 4194304
 Upload-Complete: ?0
 Content-Length: 2097152
-Content-Digest: sha-256=:(base64 digest):
+Content-Digest: sha-256=:(base64-encoded SHA-256 of the content):
 
 [2097152 bytes]
 </pre><a href="#section-5.2-5" class="pilcrow">¶</a>
@@ -1853,17 +1878,23 @@ other append <span class="bcp14">MUST</span> carry Upload-Complete with the valu
         <h3 id="name-automatic-commit">
 <a href="#section-7.1" class="section-number selfRef">7.1. </a><a href="#name-automatic-commit" class="section-name selfRef">Automatic Commit</a>
         </h3>
-<p id="section-7.1-1">When commit is "auto", the tail append is the data append that ends at
-L. A client <span class="bcp14">MUST</span> set Upload-Complete to true on the append that ends at
-L and on no other append. A server that receives Upload-Complete set to
-true on an append that does not end at L <span class="bcp14">MUST</span> reject it with status 400
-(Bad Request).<a href="#section-7.1-1" class="pilcrow">¶</a></p>
-<p id="section-7.1-2">If gaps remain when the tail append has been received, the server
+<p id="section-7.1-1">When commit is "auto", the tail append is normally the data append that
+ends at L. A client <span class="bcp14">MUST</span> set Upload-Complete to true on the append that
+ends at L and on no other append. A server that receives Upload-Complete
+set to true on an append that does not end at L <span class="bcp14">MUST</span> reject it with
+status 400 (Bad Request).<a href="#section-7.1-1" class="pilcrow">¶</a></p>
+<p id="section-7.1-2">In either commit mode, a server <span class="bcp14">MUST</span> also accept an empty append at
+offset L carrying Upload-Complete set to true as the tail append, if it
+has not already received one. <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> already allows such an
+append to complete an upload whose content has all arrived; accepting
+it in automatic mode is what lets an intermediary change the commit
+mode (<a href="#tightening" class="auto internal xref">Section 4.3</a>).<a href="#section-7.1-2" class="pilcrow">¶</a></p>
+<p id="section-7.1-3">If gaps remain when the tail append has been received, the server
 responds to the tail append with 204 (No Content) and the current
 Upload-Offset and Upload-Received. The upload completes when the last
 gap is filled. The append that fills it receives the final response for
 the upload, as described in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. Other appends receive 204
-(No Content).<a href="#section-7.1-2" class="pilcrow">¶</a></p>
+(No Content).<a href="#section-7.1-3" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="commit-explicit">
@@ -1893,8 +1924,9 @@ which helps intermediaries that hold it (<a href="#hold-tail" class="auto intern
 <a href="#section-8" class="section-number selfRef">8. </a><a href="#name-changes-to-resumable-upload" class="section-name selfRef">Changes to Resumable Upload Rules in Parallel Mode</a>
       </h2>
 <p id="section-8-1">For uploads in parallel mode only, this document changes the following
-rules of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. Section numbers refer to draft version 12. All
-other rules apply unchanged.<a href="#section-8-1" class="pilcrow">¶</a></p>
+rules of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>. Section numbers refer to version 13 of that
+draft; each rule is also described in words, so that it can be found if
+the numbering changes. All other rules apply unchanged.<a href="#section-8-1" class="pilcrow">¶</a></p>
 <span id="name-rules-changed-in-parallel-m"></span><div id="tab-updates">
 <table class="center" id="table-1">
         <caption>
@@ -1910,7 +1942,7 @@ other rules apply unchanged.<a href="#section-8-1" class="pilcrow">¶</a></p>
         <tbody>
           <tr>
             <td class="text-left" rowspan="1" colspan="1">Section 4.6: a client must not transfer data for one upload in parallel</td>
-            <td class="text-left" rowspan="1" colspan="1">Up to max-parallel appends may be in progress (<a href="#append-requests" class="auto internal xref">Section 5.2</a>).</td>
+            <td class="text-left" rowspan="1" colspan="1">Several appends may be in progress, within the limits of <a href="#limits" class="auto internal xref">Section 4.2</a> (<a href="#append-requests" class="auto internal xref">Section 5.2</a>).</td>
           </tr>
           <tr>
             <td class="text-left" rowspan="1" colspan="1">Section 4.6: a new request terminates the older one</td>
@@ -1953,9 +1985,12 @@ range arrives.<a href="#section-9-1.2.1" class="pilcrow">¶</a></p>
 </li>
         <li class="normal" id="section-9-1.3">
           <p id="section-9-1.3.1">If the append at the contiguous offset is much slower than the
-others, a client <span class="bcp14">MAY</span> send the same range again on another stream or
-connection and cancel the other copy when one finishes. Both copies
-count against max-parallel while in progress.<a href="#section-9-1.3.1" class="pilcrow">¶</a></p>
+others, a client <span class="bcp14">MAY</span> replace it by sending the same range again on
+another stream or connection. Because the server terminates the older
+of two appends for the same range (<a href="#overlap" class="auto internal xref">Section 5.3</a>), the new request
+replaces the old one rather than racing it, so the client <span class="bcp14">SHOULD</span>
+cancel the old request when it sends the new one. Only the new request
+then counts against max-parallel.<a href="#section-9-1.3.1" class="pilcrow">¶</a></p>
 </li>
         <li class="normal" id="section-9-1.4">
           <p id="section-9-1.4.1">After any failed or abandoned append, a client <span class="bcp14">SHOULD</span> perform offset
@@ -2008,16 +2043,18 @@ to a single instance.<a href="#section-10.1-2" class="pilcrow">¶</a></p>
 status 409 (Conflict), the problem type "offset-outside-window", and
 the current Upload-Offset, unless it delays the append as described in
 <a href="#h2h3-flow" class="auto internal xref">Section 12.1.2</a>.<a href="#section-10.2-1" class="pilcrow">¶</a></p>
-<p id="section-10.2-2">A server <span class="bcp14">MAY</span> reject an append that exceeds max-parallel with status 429
-(Too Many Requests), the problem type "too-many-parallel", and a
-Retry-After field.<a href="#section-10.2-2" class="pilcrow">¶</a></p>
+<p id="section-10.2-2">A server <span class="bcp14">MAY</span> reject an append with status 429 (Too Many Requests), the
+problem type "too-many-parallel", and a Retry-After field when accepting
+it would exceed max-parallel or, if max-parallel is absent, the number
+of concurrent appends the server can currently handle.<a href="#section-10.2-2" class="pilcrow">¶</a></p>
 <p id="section-10.2-3">A server <span class="bcp14">MUST</span> reject an append whose offset or length violates
 append-alignment with status 400 (Bad Request) and the problem type
 "misaligned-append".<a href="#section-10.2-3" class="pilcrow">¶</a></p>
-<p id="section-10.2-4">A server <span class="bcp14">MAY</span> lower its limits during an upload, for example under load,
-and signals new values in its next responses. It <span class="bcp14">MUST NOT</span> reject an
-append that was inside the limits it last advertised when the append
-started solely because the limits changed.<a href="#section-10.2-4" class="pilcrow">¶</a></p>
+<p id="section-10.2-4">A server <span class="bcp14">MAY</span> raise or lower its limits during an upload, for example as
+its load changes, and signals new values in its next responses
+(<a href="#fallback" class="auto internal xref">Section 4.4</a>). It <span class="bcp14">MUST NOT</span> reject an append that was inside the limits
+it last advertised when the append started solely because the limits
+changed.<a href="#section-10.2-4" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="server-storage">
@@ -2089,17 +2126,20 @@ and parallel mode works through it.<a href="#section-11.1-1" class="pilcrow">¶<
 </li>
           <li class="normal" id="section-11.1-3.2">
             <p id="section-11.1-3.2.1"><span class="bcp14">MAY</span> force sequential behavior by removing Upload-Parallel from an
-upload creation request or by setting max-parallel to 1 in the
-response;<a href="#section-11.1-3.2.1" class="pilcrow">¶</a></p>
+upload creation request or by setting max-parallel to 1 in the upload
+creation response (<a href="#fallback" class="auto internal xref">Section 4.4</a>);<a href="#section-11.1-3.2.1" class="pilcrow">¶</a></p>
 </li>
           <li class="normal" id="section-11.1-3.3">
-            <p id="section-11.1-3.3.1"><span class="bcp14">MUST NOT</span> remove or alter Upload-Received, except as described in
-<a href="#hold-tail-retrieval" class="auto internal xref">Section 11.3.4</a>;<a href="#section-11.1-3.3.1" class="pilcrow">¶</a></p>
+            <p id="section-11.1-3.3.1"><span class="bcp14">MUST</span> enforce any limit it tightens (<a href="#tightening" class="auto internal xref">Section 4.3</a>);<a href="#section-11.1-3.3.1" class="pilcrow">¶</a></p>
 </li>
           <li class="normal" id="section-11.1-3.4">
-            <p id="section-11.1-3.4.1">when it balances load across servers, <span class="bcp14">MUST</span> meet the consistency
+            <p id="section-11.1-3.4.1"><span class="bcp14">MUST NOT</span> remove or alter Upload-Received, except as described in
+<a href="#hold-tail-retrieval" class="auto internal xref">Section 11.3.4</a>;<a href="#section-11.1-3.4.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-11.1-3.5">
+            <p id="section-11.1-3.5.1">when it balances load across servers, <span class="bcp14">MUST</span> meet the consistency
 requirement of <a href="#server-state" class="auto internal xref">Section 10.1</a>, for example by routing all requests
-for an upload resource to the same server.<a href="#section-11.1-3.4.1" class="pilcrow">¶</a></p>
+for an upload resource to the same server.<a href="#section-11.1-3.5.1" class="pilcrow">¶</a></p>
 </li>
         </ul>
 <p id="section-11.1-4">Responses to appends and to offset retrieval are not cacheable, as
@@ -2157,10 +2197,20 @@ content that spans appends;<a href="#section-11.3.1-2.3.1" class="pilcrow">¶</a
 inspected and skip inspecting it again.<a href="#section-11.3.1-2.4.1" class="pilcrow">¶</a></p>
 </li>
           </ul>
-<p id="section-11.3.1-3">Some formats can only be analyzed as a whole, such as archives that
-keep their index at the end. For those, an intermediary <span class="bcp14">MAY</span> set
-reorder-window to the upload length and inspect the complete content
-before releasing the tail.<a href="#section-11.3.1-3" class="pilcrow">¶</a></p>
+<p id="section-11.3.1-3">In-order inspection needs a single view of the whole upload. When
+several instances of an intermediary share the load, all requests for
+one upload resource <span class="bcp14">MUST</span> reach the same instance, or the instances <span class="bcp14">MUST</span>
+share the buffered and inspection state of the upload. An instance that
+receives an append for an upload whose earlier content it has not
+inspected, and cannot obtain that state, <span class="bcp14">MUST</span> treat this as lost state
+(<a href="#inspect-failure" class="auto internal xref">Section 11.3.7</a>).<a href="#section-11.3.1-3" class="pilcrow">¶</a></p>
+<p id="section-11.3.1-4">Some formats can only be analyzed as a whole, such as archives that
+keep their index at the end. For those, an intermediary keeps the
+content as it passes and inspects the complete content before releasing
+the tail. This needs storage for the whole upload but not a larger
+reorder window, since the content still arrives in order within the
+window; an intermediary <span class="bcp14">MUST NOT</span> raise reorder-window for this purpose
+(<a href="#tightening" class="auto internal xref">Section 4.3</a>).<a href="#section-11.3.1-4" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="forwarding">
@@ -2203,11 +2253,12 @@ it.<a href="#section-11.3.3-2" class="pilcrow">¶</a></p>
 <p id="section-11.3.3-3">With automatic commit the tail append can be large. The intermediary
 <span class="bcp14">MAY</span> forward all of it except a final part, as an append with
 Upload-Complete set to false, and hold only that final part as the tail
-it forwards later. The final part <span class="bcp14">SHOULD</span> be one append-alignment unit
-if an alignment applies. With explicit commit the tail append is empty
-and nothing needs to be split.<a href="#section-11.3.3-3" class="pilcrow">¶</a></p>
-<p id="section-11.3.3-4">An intermediary <span class="bcp14">MAY</span> set commit to "explicit" when tightening limits
-(<a href="#tightening" class="auto internal xref">Section 4.3</a>) so that the tail append is always empty.<a href="#section-11.3.3-4" class="pilcrow">¶</a></p>
+it forwards later. The forwarded part is not a tail append, so if
+append-alignment applies it <span class="bcp14">MUST</span> end at a multiple of append-alignment:
+the intermediary forwards up to the largest such multiple that is less
+than the upload length and holds the rest. If no such multiple lies
+within the tail append, the intermediary holds all of it. With explicit
+commit the tail append is empty and nothing needs to be split.<a href="#section-11.3.3-3" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="hold-tail-retrieval">
@@ -2215,12 +2266,14 @@ and nothing needs to be split.<a href="#section-11.3.3-3" class="pilcrow">¶</a>
           <h4 id="name-offset-retrieval-while-hold">
 <a href="#section-11.3.4" class="section-number selfRef">11.3.4. </a><a href="#name-offset-retrieval-while-hold" class="section-name selfRef">Offset Retrieval While Holding</a>
           </h4>
-<p id="section-11.3.4-1">While it holds the tail append, the intermediary <span class="bcp14">SHOULD</span> answer offset
-retrieval requests for the upload itself, or modify the server's
+<p id="section-11.3.4-1">With automatic commit, the held tail carries content the server has
+not yet received. While it holds it, the intermediary <span class="bcp14">SHOULD</span> answer
+offset retrieval requests for the upload itself, or modify the server's
 response, so that the held range is reported as received and the
 Upload-Inspection field (<a href="#upload-inspection" class="auto internal xref">Section 11.3.6</a>) is included. Otherwise
 the client would see a gap at the end and re-send the tail, which is
-safe but wasteful.<a href="#section-11.3.4-1" class="pilcrow">¶</a></p>
+safe but wasteful. With explicit commit no content is held, and the
+intermediary only adds Upload-Inspection to these responses.<a href="#section-11.3.4-1" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="verdicts">
@@ -2301,13 +2354,17 @@ be committed later.<a href="#section-11.3.7-1" class="pilcrow">¶</a></p>
 <p id="section-11.3.7-2">An intermediary that abandons an upload, for example when the client
 disconnects or the intermediary itself restarts, <span class="bcp14">SHOULD</span> cancel the
 upload at the server rather than rely on expiry.<a href="#section-11.3.7-2" class="pilcrow">¶</a></p>
-<p id="section-11.3.7-3">An intermediary that has lost its buffered or inspection state for an
-upload <span class="bcp14">MUST NOT</span> continue to answer offset retrieval on the server's
-behalf (<a href="#hold-tail-retrieval" class="auto internal xref">Section 11.3.4</a>); it forwards those requests, so the
-client learns the state the server actually has and re-sends whatever
-is missing. It <span class="bcp14">MUST NOT</span> treat any part of the upload as already
-inspected unless it kept the inspection state, and otherwise inspects
-again from the contiguous offset or blocks the upload.<a href="#section-11.3.7-3" class="pilcrow">¶</a></p>
+<p id="section-11.3.7-3">An intermediary that loses its buffered or inspection state for an
+upload, for example after a restart, cannot recover by inspecting again.
+The content before the contiguous offset is already at the server and
+will not be sent again, and in-order engines would also miss the start
+of the content, where file types are recognized. The intermediary
+therefore <span class="bcp14">MUST NOT</span> forward the tail append for that upload. It <span class="bcp14">MUST</span>
+cancel the upload at the server and respond to the client's requests for
+it with 410 (Gone), so that the client creates a new upload
+(<a href="#client-reqs" class="auto internal xref">Section 9</a>). An intermediary that terminates parallel mode
+(<a href="#translation" class="auto internal xref">Section 11.2</a>) acts as the server on the client-facing hop and
+follows <a href="#server-failure" class="auto internal xref">Section 10.5</a> in the same way.<a href="#section-11.3.7-3" class="pilcrow">¶</a></p>
 <p id="section-11.3.7-4">If forwarding a held tail append fails because the upload has expired
 or the server has lost it, the intermediary reports the failure to the
 client and discards the held content.<a href="#section-11.3.7-4" class="pilcrow">¶</a></p>
@@ -2343,10 +2400,21 @@ mismatch as blocked.<a href="#section-11.3.8-1" class="pilcrow">¶</a></p>
         </h3>
 <p id="section-12.1-1">Over HTTP/2 <span>[<a href="#RFC9113" class="cite xref">RFC9113</a>]</span> and HTTP/3 <span>[<a href="#RFC9114" class="cite xref">RFC9114</a>]</span>, each append is a
 request on its own stream, and several appends can share one
-connection. Because streams on one connection share one congestion
-controller, a client <span class="bcp14">MAY</span> also open additional connections, within
-max-parallel, when a single connection does not use the available
-capacity.<a href="#section-12.1-1" class="pilcrow">¶</a></p>
+connection. Parallel appends on one connection already remove the idle
+round trip that sequential appends spend waiting for each response, and
+a slow append no longer holds up the ranges after it. With HTTP/3, a
+lost packet also delays only the stream it belongs to; with HTTP/2 it
+delays every stream on the connection.<a href="#section-12.1-1" class="pilcrow">¶</a></p>
+<p id="section-12.1-2">Parallel appends on one connection do not raise that connection's
+throughput limit, however. All streams on a connection share one
+congestion controller, whether the transport is TCP or QUIC, so on a
+path with a long round-trip time or packet loss a single connection can
+still use only part of the available capacity. Only additional
+connections, each with its own congestion controller, lift that limit.
+A client <span class="bcp14">MAY</span> therefore spread appends over more than one connection
+when a single connection does not use the available capacity, subject
+to <a href="#fairness" class="auto internal xref">Section 12.3</a>. The total number of appends in progress still stays
+within max-parallel when it is present.<a href="#section-12.1-2" class="pilcrow">¶</a></p>
 <div id="h2h3-priority">
 <section id="section-12.1.1">
           <h4 id="name-priorities">
@@ -2456,8 +2524,8 @@ append with 409 and "offset-outside-window" rather than delay it.<a href="#secti
 </li>
           <li class="normal" id="section-12.2-2.3">
             <p id="section-12.2-2.3.1">HTTP/1.1 has no priorities. A client keeps the append at the
-contiguous offset in progress first and <span class="bcp14">MAY</span> send it again on a second
-connection if it stalls (<a href="#client-reqs" class="auto internal xref">Section 9</a>).<a href="#section-12.2-2.3.1" class="pilcrow">¶</a></p>
+contiguous offset in progress first and <span class="bcp14">MAY</span> replace it with a new
+request on another connection if it stalls (<a href="#client-reqs" class="auto internal xref">Section 9</a>).<a href="#section-12.2-2.3.1" class="pilcrow">¶</a></p>
 </li>
           <li class="normal" id="section-12.2-2.4">
             <p id="section-12.2-2.4.1">Some intermediaries do not forward informational responses. A client
@@ -2477,8 +2545,43 @@ and therefore do not use chunked transfer coding.<a href="#section-12.2-2.6.1" c
 (Continue) response arrives, as described in <span>[<a href="#RFC9110" class="cite xref">RFC9110</a>]</span>.<a href="#section-12.2-2.7.1" class="pilcrow">¶</a></p>
 </li>
         </ul>
-<p id="section-12.2-3">If max-parallel is absent or 1, client and server use the sequential
-behavior of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> unchanged.<a href="#section-12.2-3" class="pilcrow">¶</a></p>
+<p id="section-12.2-3">If the upload is not in parallel mode (<a href="#fallback" class="auto internal xref">Section 4.4</a>), client and server
+use the sequential behavior of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> unchanged.<a href="#section-12.2-3" class="pilcrow">¶</a></p>
+</section>
+</div>
+<div id="fairness">
+<section id="section-12.3">
+        <h3 id="name-congestion-control-and-fair">
+<a href="#section-12.3" class="section-number selfRef">12.3. </a><a href="#name-congestion-control-and-fair" class="section-name selfRef">Congestion Control and Fairness</a>
+        </h3>
+<p id="section-12.3-1">An upload that uses several connections can take more than one
+connection's share of a bottleneck it shares with other traffic.
+Additional connections are meant for paths where a single connection is
+limited by round-trip time or loss, not for gaining a larger share of a
+congested link. Therefore:<a href="#section-12.3-1" class="pilcrow">¶</a></p>
+<ul class="normal">
+<li class="normal" id="section-12.3-2.1">
+            <p id="section-12.3-2.1.1">A client <span class="bcp14">SHOULD</span> start with one connection and open additional
+connections only while doing so increases the upload's throughput. It
+<span class="bcp14">SHOULD</span> stop adding connections when it does not.<a href="#section-12.3-2.1.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.3-2.2">
+            <p id="section-12.3-2.2.1">A client <span class="bcp14">SHOULD NOT</span> use more connections for one upload than it
+needs, and <span class="bcp14">MUST</span> stay within max-parallel when it is present.<a href="#section-12.3-2.2.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.3-2.3">
+            <p id="section-12.3-2.3.1">Servers and intermediaries can limit concurrency for an upload with
+max-parallel, and can reject excess appends with 429 (Too Many
+Requests) (<a href="#server-window" class="auto internal xref">Section 10.2</a>).<a href="#section-12.3-2.3.1" class="pilcrow">¶</a></p>
+</li>
+          <li class="normal" id="section-12.3-2.4">
+            <p id="section-12.3-2.4.1">Each connection runs the congestion control specified for its
+transport. This document does not change congestion control.<a href="#section-12.3-2.4.1" class="pilcrow">¶</a></p>
+</li>
+        </ul>
+<p id="section-12.3-3">Multipath extensions to QUIC, under development in the IETF, could
+offer a single connection with a separate congestion controller for
+each path. This document does not depend on them.<a href="#section-12.3-3" class="pilcrow">¶</a></p>
 </section>
 </div>
 </section>
@@ -2528,7 +2631,7 @@ form https://iana.org/assignments/http-problem-types#NAME.<a href="#section-13-1
           <tr>
             <td class="text-left" rowspan="1" colspan="1">too-many-parallel</td>
             <td class="text-left" rowspan="1" colspan="1">429</td>
-            <td class="text-left" rowspan="1" colspan="1">More than max-parallel appends are in progress.</td>
+            <td class="text-left" rowspan="1" colspan="1">More appends are in progress than max-parallel allows, or than the server can currently handle.</td>
           </tr>
           <tr>
             <td class="text-left" rowspan="1" colspan="1">upload-blocked</td>
@@ -2553,37 +2656,44 @@ engine, signature, or policy rule that matched.<a href="#section-13-4" class="pi
 <p id="section-14-1">The security considerations of <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> apply to this extension as
 well.<a href="#section-14-1" class="pilcrow">¶</a></p>
 <p id="section-14-2">A client cannot get more parallelism than every party on the path
-allows, because intermediaries can only tighten the limits
-(<a href="#tightening" class="auto internal xref">Section 4.3</a>). An inspecting intermediary controls whether an upload
-is committed by holding its tail append (<a href="#hold-tail" class="auto internal xref">Section 11.3.3</a>), so content
-cannot be committed without passing through any inspection on the
-path.<a href="#section-14-2" class="pilcrow">¶</a></p>
-<p id="section-14-3">An attacker may try to split content across appends so that no single
+allows: intermediaries can only tighten the limits, and they enforce the
+limits they tighten (<a href="#tightening" class="auto internal xref">Section 4.3</a>), so a client that ignores them
+cannot overrun an intermediary's buffers.<a href="#section-14-2" class="pilcrow">¶</a></p>
+<p id="section-14-3">An inspecting intermediary controls whether an upload is committed by
+holding its tail append (<a href="#hold-tail" class="auto internal xref">Section 11.3.3</a>). This relies on the intermediary
+seeing all of the upload's content in order. An attacker could try to
+break that view, for example by steering appends for one upload to
+different instances of a load-balanced intermediary, or by provoking a
+restart partway through an upload. An intermediary therefore keeps
+each upload on one instance or shares its state (<a href="#in-order" class="auto internal xref">Section 11.3.1</a>), and
+cancels any upload it cannot inspect completely rather than releasing
+it (<a href="#inspect-failure" class="auto internal xref">Section 11.3.7</a>).<a href="#section-14-3" class="pilcrow">¶</a></p>
+<p id="section-14-4">An attacker may try to split content across appends so that no single
 append matches an inspection policy. Processing appends in order,
 across append boundaries (<a href="#in-order" class="auto internal xref">Section 11.3.1</a>), handles this. Evaluating each
-append on its own does not.<a href="#section-14-3" class="pilcrow">¶</a></p>
-<p id="section-14-4">A digest sent by the client is only a claim. Servers and intermediaries
+append on its own does not.<a href="#section-14-4" class="pilcrow">¶</a></p>
+<p id="section-14-5">A digest sent by the client is only a claim. Servers and intermediaries
 can use it to detect errors or to look up earlier verdicts, but have to
 verify it against the actual content before relying on it
-(<a href="#verdict-cache" class="auto internal xref">Section 11.3.8</a>).<a href="#section-14-4" class="pilcrow">¶</a></p>
-<p id="section-14-5">The reorder window bounds how much out-of-order data is buffered per
+(<a href="#verdict-cache" class="auto internal xref">Section 11.3.8</a>).<a href="#section-14-5" class="pilcrow">¶</a></p>
+<p id="section-14-6">The reorder window bounds how much out-of-order data is buffered per
 upload, but an attacker can still open many uploads. Servers and
 intermediaries need to limit the number of uploads per client, the
 total amount of buffered data, and how long they hold delayed appends.
-They can respond with 429 (Too Many Requests) when overloaded.<a href="#section-14-5" class="pilcrow">¶</a></p>
-<p id="section-14-6">Incomplete uploads contain gaps and possibly uninspected data. They are
+They can respond with 429 (Too Many Requests) when overloaded.<a href="#section-14-6" class="pilcrow">¶</a></p>
+<p id="section-14-7">Incomplete uploads contain gaps and possibly uninspected data. They are
 never exposed as the representation of a resource (<a href="#server-storage" class="auto internal xref">Section 10.3</a>),
 and gaps are never filled with bytes that could reveal other stored
-data.<a href="#section-14-6" class="pilcrow">¶</a></p>
-<p id="section-14-7">Detailed inspection results would help an attacker adjust content until
+data.<a href="#section-14-7" class="pilcrow">¶</a></p>
+<p id="section-14-8">Detailed inspection results would help an attacker adjust content until
 it passes. For that reason Upload-Inspection and "upload-blocked"
-responses carry only coarse information (<a href="#problems" class="auto internal xref">Section 13</a>).<a href="#section-14-7" class="pilcrow">¶</a></p>
-<p id="section-14-8">Parallel mode sends the upload resource URI over more connections. As
+responses carry only coarse information (<a href="#problems" class="auto internal xref">Section 13</a>).<a href="#section-14-8" class="pilcrow">¶</a></p>
+<p id="section-14-9">Parallel mode sends the upload resource URI over more connections. As
 in <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span>, the URI needs to be hard to guess, and access to it
-needs to be tied to the client's authorization.<a href="#section-14-8" class="pilcrow">¶</a></p>
-<p id="section-14-9">Appends are not sent in TLS early data (<a href="#h2h3-other" class="auto internal xref">Section 12.1.3</a>), and repeating
+needs to be tied to the client's authorization.<a href="#section-14-9" class="pilcrow">¶</a></p>
+<p id="section-14-10">Appends are not sent in TLS early data (<a href="#h2h3-other" class="auto internal xref">Section 12.1.3</a>), and repeating
 an append with the same content has no effect, so replay does not cause
-harm.<a href="#section-14-9" class="pilcrow">¶</a></p>
+harm.<a href="#section-14-10" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="iana-considerations">
@@ -2645,9 +2755,11 @@ Transfer Protocol (HTTP) Field Name Registry" established by
         <h3 id="name-upload-limit-parameters-2">
 <a href="#section-15.2" class="section-number selfRef">15.2. </a><a href="#name-upload-limit-parameters-2" class="section-name selfRef">Upload-Limit Parameters</a>
         </h3>
-<p id="section-15.2-1">If <span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> establishes a registry of Upload-Limit parameters, IANA
-is asked to register max-parallel, reorder-window, append-alignment,
-and commit, with a reference to <a href="#limits" class="auto internal xref">Section 4.2</a> of this document.<a href="#section-15.2-1" class="pilcrow">¶</a></p>
+<p id="section-15.2-1"><span>[<a href="#RESUMABLE" class="cite xref">RESUMABLE</a>]</span> does not establish a registry for Upload-Limit
+parameters, so the parameters max-parallel, reorder-window,
+append-alignment, and commit are defined in <a href="#limits" class="auto internal xref">Section 4.2</a> of this document
+without a registration. If such a registry is created, IANA is asked to
+add these four parameters to it, with a reference to <a href="#limits" class="auto internal xref">Section 4.2</a>.<a href="#section-15.2-1" class="pilcrow">¶</a></p>
 </section>
 </div>
 <div id="http-problem-types">
@@ -2685,6 +2797,10 @@ with a reference to <a href="#problems" class="auto internal xref">Section 13</a
         <dd>
 <span class="refAuthor">Leiba, B.</span>, <span class="refTitle">"Ambiguity of Uppercase vs Lowercase in RFC 2119 Key Words"</span>, <span class="seriesInfo">BCP 14</span>, <span class="seriesInfo">RFC 8174</span>, <span class="seriesInfo">DOI 10.17487/RFC8174</span>, <time datetime="2017-05" class="refDate">May 2017</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8174">https://www.rfc-editor.org/rfc/rfc8174</a>&gt;</span>. </dd>
 <dd class="break"></dd>
+<dt id="RFC8470">[RFC8470]</dt>
+        <dd>
+<span class="refAuthor">Thomson, M.</span>, <span class="refAuthor">Nottingham, M.</span>, and <span class="refAuthor">W. Tarreau</span>, <span class="refTitle">"Using Early Data in HTTP"</span>, <span class="seriesInfo">RFC 8470</span>, <span class="seriesInfo">DOI 10.17487/RFC8470</span>, <time datetime="2018-09" class="refDate">September 2018</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8470">https://www.rfc-editor.org/rfc/rfc8470</a>&gt;</span>. </dd>
+<dd class="break"></dd>
 <dt id="RFC9000">[RFC9000]</dt>
         <dd>
 <span class="refAuthor">Iyengar, J., Ed.</span> and <span class="refAuthor">M. Thomson, Ed.</span>, <span class="refTitle">"QUIC: A UDP-Based Multiplexed and Secure Transport"</span>, <span class="seriesInfo">RFC 9000</span>, <span class="seriesInfo">DOI 10.17487/RFC9000</span>, <time datetime="2021-05" class="refDate">May 2021</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9000">https://www.rfc-editor.org/rfc/rfc9000</a>&gt;</span>. </dd>
@@ -2704,6 +2820,10 @@ with a reference to <a href="#problems" class="auto internal xref">Section 13</a
 <dt id="RFC9114">[RFC9114]</dt>
         <dd>
 <span class="refAuthor">Bishop, M., Ed.</span>, <span class="refTitle">"HTTP/3"</span>, <span class="seriesInfo">RFC 9114</span>, <span class="seriesInfo">DOI 10.17487/RFC9114</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9114">https://www.rfc-editor.org/rfc/rfc9114</a>&gt;</span>. </dd>
+<dd class="break"></dd>
+<dt id="RFC9218">[RFC9218]</dt>
+        <dd>
+<span class="refAuthor">Oku, K.</span> and <span class="refAuthor">L. Pardue</span>, <span class="refTitle">"Extensible Prioritization Scheme for HTTP"</span>, <span class="seriesInfo">RFC 9218</span>, <span class="seriesInfo">DOI 10.17487/RFC9218</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9218">https://www.rfc-editor.org/rfc/rfc9218</a>&gt;</span>. </dd>
 <dd class="break"></dd>
 <dt id="RFC9457">[RFC9457]</dt>
         <dd>
@@ -2729,14 +2849,6 @@ with a reference to <a href="#problems" class="auto internal xref">Section 13</a
 <dt id="BYTERANGE">[BYTERANGE]</dt>
         <dd>
 <span class="refAuthor">Wright, A.</span>, <span class="refTitle">"Byte Range PATCH"</span>, <span class="refContent">Work in Progress</span>, <span class="seriesInfo">Internet-Draft, draft-ietf-httpapi-patch-byterange-04</span>, <time datetime="2026-07-06" class="refDate">6 July 2026</time>, <span>&lt;<a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-patch-byterange-04">https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-patch-byterange-04</a>&gt;</span>. </dd>
-<dd class="break"></dd>
-<dt id="RFC8470">[RFC8470]</dt>
-        <dd>
-<span class="refAuthor">Thomson, M.</span>, <span class="refAuthor">Nottingham, M.</span>, and <span class="refAuthor">W. Tarreau</span>, <span class="refTitle">"Using Early Data in HTTP"</span>, <span class="seriesInfo">RFC 8470</span>, <span class="seriesInfo">DOI 10.17487/RFC8470</span>, <time datetime="2018-09" class="refDate">September 2018</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc8470">https://www.rfc-editor.org/rfc/rfc8470</a>&gt;</span>. </dd>
-<dd class="break"></dd>
-<dt id="RFC9218">[RFC9218]</dt>
-        <dd>
-<span class="refAuthor">Oku, K.</span> and <span class="refAuthor">L. Pardue</span>, <span class="refTitle">"Extensible Prioritization Scheme for HTTP"</span>, <span class="seriesInfo">RFC 9218</span>, <span class="seriesInfo">DOI 10.17487/RFC9218</span>, <time datetime="2022-06" class="refDate">June 2022</time>, <span>&lt;<a href="https://www.rfc-editor.org/rfc/rfc9218">https://www.rfc-editor.org/rfc/rfc9218</a>&gt;</span>. </dd>
 <dd class="break"></dd>
 <dt id="TUS">[TUS]</dt>
       <dd>
