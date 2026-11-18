@@ -4,8 +4,9 @@
 
 HTTP                                                       S. Pallagatti
 Internet-Draft                                             A. Maheshwari
-Intended status: Standards Track                                 Zscaler
-Expires: 14 April 2027                                   11 October 2026
+Intended status: Standards Track                            Y. Rosomakho
+Expires: 22 May 2027                                             Zscaler
+                                                        18 November 2026
 
 
                  Parallel Appends for Resumable Uploads
@@ -56,7 +57,7 @@ Status of This Memo
    time.  It is inappropriate to use Internet-Drafts as reference
    material or to cite them other than as "work in progress."
 
-   This Internet-Draft will expire on 14 April 2027.
+   This Internet-Draft will expire on 22 May 2027.
 
 Copyright Notice
 
@@ -1241,9 +1242,9 @@ Table of Contents
    [RESUMABLE]
               Kleidl, M., Zhang, G., and L. Pardue, "Resumable Uploads
               for HTTP", Work in Progress, Internet-Draft, draft-ietf-
-              httpbis-resumable-upload-13, 6 October 2026,
+              httpbis-resumable-upload-15, 2 November 2026,
               <https://datatracker.ietf.org/doc/html/draft-ietf-httpbis-
-              resumable-upload-13>.
+              resumable-upload-15>.
 
    [RFC2119]  Bradner, S., "Key words for use in RFCs to Indicate
               Requirement Levels", BCP 14, RFC 2119,
@@ -1299,9 +1300,9 @@ Table of Contents
 
    [BYTERANGE]
               Wright, A., "Byte Range PATCH", Work in Progress,
-              Internet-Draft, draft-ietf-httpapi-patch-byterange-04, 6
-              July 2026, <https://datatracker.ietf.org/doc/html/draft-
-              ietf-httpapi-patch-byterange-04>.
+              Internet-Draft, draft-ietf-httpapi-patch-byterange-05, 2
+              November 2026, <https://datatracker.ietf.org/doc/html/
+              draft-ietf-httpapi-patch-byterange-05>.
 
    [TUS]      tus project, "tus resumable upload protocol, version
               1.0.0", 25 March 2016,
@@ -1322,3 +1323,8 @@ Authors' Addresses
    Akshat Maheshwari
    Zscaler
    Email: akshatmaheshwari1995@gmail.com
+
+
+   Yaroslav Rosomakho
+   Zscaler
+   Email: yaroslavros@gmail.com
