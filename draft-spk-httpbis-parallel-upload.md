@@ -31,6 +31,10 @@ author:
     fullname: Akshat Maheshwari
     organization: "Zscaler"
     email: "akshatmaheshwari1995@gmail.com"
+ -
+    fullname: Yaroslav Rosomakho
+    organization: "Zscaler"
+    email: "yaroslavros@gmail.com"
 
 normative:
   RESUMABLE: I-D.ietf-httpbis-resumable-upload
